@@ -1,0 +1,79 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Research project: Long-Horizon Memory
+  Purpose: Explore memory mechanisms for long-horizon AI agents
+  Tech stack: Python (primary), OpenCode agent harness, Qwen3.6-35B-A3B model
+  Benchmark: Terminal-Bench 2.0
+  Primary metric: Pass@1
+  Architecture: Memory system with create/update/retrieve/discard operations
+  Evaluation: Compare Memory ON vs Memory OFF with fixed model and harness
+
+strict_tdd: false
+
+rules:
+  proposal:
+    - Include research questions and hypotheses
+    - Identify metrics for evaluation
+    - Document expected impact on agent performance
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Include quantitative thresholds where applicable
+  design:
+    - Include memory architecture diagrams
+    - Document memory lifecycle (create, update, retrieve, discard)
+    - Specify memory representation format
+  tasks:
+    - Group tasks by phase (baseline, memory design, evaluation)
+    - Use hierarchical numbering (1.1, 1.2, etc.)
+    - Keep tasks small enough to complete in one session
+  apply:
+    - Follow existing code patterns
+    - Include unit tests for memory operations
+    - Document memory performance metrics
+  verify:
+    - Run Terminal-Bench 2.0 evaluation
+    - Compare Pass@1 metrics
+    - Measure token usage and latency
+  archive:
+    - Document experimental results
+    - Update research roadmap based on findings
+
+testing:
+  strict_tdd: false
+  detected: "2026-08-11"
+
+  runner:
+    command: "python -m pytest"
+    framework: "pytest"
+
+  layers:
+    unit:
+      available: true
+      tool: "pytest"
+      note: "Unit tests for memory operations"
+    integration:
+      available: true
+      tool: "pytest"
+      note: "Integration tests with OpenCode harness"
+    e2e:
+      available: true
+      tool: "Terminal-Bench 2.0"
+      note: "End-to-end evaluation on benchmark tasks"
+
+  coverage:
+    available: true
+    command: "python -m pytest --cov"
+
+  quality:
+    linter:
+      available: true
+      command: "ruff check"
+    type_checker:
+      available: true
+      command: "mypy"
+    formatter:
+      available: true
+      command: "ruff format"
