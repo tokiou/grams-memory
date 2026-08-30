@@ -1,1 +1,6 @@
-tecnicas-utilizadas.txt
+.env
+jobs/
+.harbor-home/
+no-upload
+__pycache__/
+*.py[cod]

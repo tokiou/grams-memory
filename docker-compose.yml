@@ -1,0 +1,41 @@
+services:
+  harbor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    working_dir: ${PWD}
+
+    env_file:
+      - .env
+
+    environment:
+      HOME: ${PWD}/.harbor-home
+      PYTHONPATH: ${PWD}
+
+      OPENCODE_CONFIG_CONTENT: >-
+        {
+          "$$schema": "https://opencode.ai/config.json",
+          "model": "modelapi/${MODEL_DEPLOYMENT}",
+          "provider": {
+            "modelapi": {
+              "npm": "@ai-sdk/openai-compatible",
+              "name": "Model API",
+              "options": {
+                "baseURL": "{env:MODEL_BASE_URL}",
+                "apiKey": "{env:MODEL_API_KEY}"
+              },
+              "models": {
+                "${MODEL_DEPLOYMENT}": {
+                  "name": "${MODEL_DEPLOYMENT}"
+                }
+              }
+            }
+          }
+        }
+
+    volumes:
+    - "${PWD}:${PWD}"
+    - /var/run/docker.sock:/var/run/docker.sock
+
+    tty: true
