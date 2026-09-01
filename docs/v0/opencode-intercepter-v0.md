@@ -181,6 +181,16 @@ The plugin currently registers these OpenCode hooks:
 - `tool.execute.before`, for tool-call observation before execution;
 - `tool.execute.after`, for tool-result observation after execution.
 
+The receiver intentionally does not forward the event stream one event at a
+time. It ignores message deltas, tool-start events, and intermediate part
+updates. It retains the latest text/reasoning part in memory and emits only
+`USER_MESSAGE_FINAL`, `TEXT_FINAL`, or `REASONING_FINAL` when the part has
+ended, or when `session.idle` forces the final flush. It emits one
+`TOOL_CALL_FINAL` for the complete tool intent and one `TOOL_RESULT_FINAL`
+after `tool.execute.after`, and emits `MESSAGE_COMPLETED` on `session.idle`.
+This preserves the causal context without making the Memory Supervisor
+process token-level or tool-progress events.
+
 The normalizer maps native events to GRAMS event types, including:
 
 ```text
