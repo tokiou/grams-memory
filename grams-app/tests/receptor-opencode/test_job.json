@@ -1,0 +1,32 @@
+{
+  "job_name": "receptor-opencode",
+  "jobs_dir": "/Users/franciscovega/fran-proyects/grams-memory/grams-app/tests/receptor-opencode/jobs",
+  "n_attempts": 1,
+  "n_concurrent_trials": 1,
+  "quiet": false,
+  "environment": {
+    "type": "docker",
+    "delete": true,
+    "override_memory_mb": 2048,
+    "extra_allowed_hosts": ["host.docker.internal"]
+  },
+  "agents": [
+    {
+      "name": "grams_opencode.grams_opencode:GramsOpenCode",
+      "model_name": "modelapi/qwen3.6",
+      "env": {
+        "MODEL_API_KEY": "${MODEL_API_KEY}",
+        "MODEL_BASE_URL": "https://api.nan.builders/v1",
+        "OPENCODE_CONFIG_CONTENT": "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"model\": \"modelapi/qwen3.6\",\n  \"provider\": {\n    \"modelapi\": {\n      \"npm\": \"@ai-sdk/openai-compatible\",\n      \"name\": \"Model API\",\n      \"options\": {\n        \"baseURL\": \"{env:MODEL_BASE_URL}\",\n        \"apiKey\": \"{env:MODEL_API_KEY}\"\n      },\n      \"models\": {\n        \"qwen3.6\": {\n          \"name\": \"qwen3.6\"\n        }\n      }\n    }\n  }\n}"
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "path": "/Users/franciscovega/fran-proyects/grams-memory/grams-app/tests/receptor-opencode"
+    }
+  ],
+  "verifier": {
+    "disable": true
+  }
+}
