@@ -1,0 +1,17 @@
+version = "1.0"
+
+[metadata]
+author_name = "GRAMS"
+difficulty = "easy"
+category = "software-engineering"
+tags = ["receiver", "opencode"]
+
+[agent]
+timeout_sec = 300.0
+
+[verifier]
+timeout_sec = 60.0
+
+[environment]
+build_timeout_sec = 120.0
+docker_image = "python:3.12-slim-bookworm"
