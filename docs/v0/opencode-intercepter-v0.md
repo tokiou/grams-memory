@@ -159,6 +159,11 @@ plugin:
     └── src/index.ts                  OpenCode plugin and event normalizer
 ```
 
+The Docker Compose project and service are named `grams-opencode`. The Python
+package keeps the underscore form because it is also used as an import name.
+If the stack was previously started without an explicit project name, stop the
+old `grams-memory` project once with `docker compose -p grams-memory down`.
+
 Harbor job configurations import `GramsOpenCode` directly from
 `grams_opencode.grams_opencode`.
 

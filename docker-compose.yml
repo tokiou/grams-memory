@@ -1,5 +1,7 @@
+name: grams-opencode
+
 services:
-  harbor:
+  grams-opencode:
     build:
       context: .
       dockerfile: Dockerfile
