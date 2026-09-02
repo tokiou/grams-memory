@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/app"
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/config"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/app"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/config"
 )
 
 func main() {

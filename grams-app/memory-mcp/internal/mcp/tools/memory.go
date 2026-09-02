@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/memory"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/memory"
 	"time"
 )
 

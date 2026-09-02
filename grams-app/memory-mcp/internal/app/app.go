@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/config"
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/mcp"
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/memory"
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/platform/sqlite"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/config"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/mcp"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/memory"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/platform/sqlite"
 )
 
 type App struct {

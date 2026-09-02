@@ -1,4 +1,4 @@
-module github.com/tokiou/grams-memory/grams-app/memory_mcp
+module github.com/tokiou/grams-memory/grams-app/memory-mcp
 
 go 1.25.0
 
