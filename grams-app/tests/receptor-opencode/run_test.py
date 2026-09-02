@@ -26,7 +26,7 @@ def main() -> int:
             "compose",
             "exec",
             "-T",
-            "harbor",
+            "grams-opencode",
             "harbor",
             "run",
             "--config",
