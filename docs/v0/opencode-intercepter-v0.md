@@ -151,7 +151,7 @@ The current integration is split between the Harbor adapter and the OpenCode
 plugin:
 
 ```text
- grams_opencode/
+ grams-opencode/
 ├── __init__.py                      Public GramsOpenCode export
 ├── grams_opencode.py                Harbor adapter / trial bootstrap
 └── opencode_plugin/
@@ -159,13 +159,14 @@ plugin:
     └── src/index.ts                  OpenCode plugin and event normalizer
 ```
 
-The Docker Compose project and service are named `grams-opencode`. The Python
-package keeps the underscore form because it is also used as an import name.
+The Docker Compose project, service, and adapter directory are named
+`grams-opencode`. The adapter module remains `grams_opencode.py`; its filename
+is unchanged because the Harbor import points to that module.
 If the stack was previously started without an explicit project name, stop the
 old `grams-memory` project once with `docker compose -p grams-memory down`.
 
 Harbor job configurations import `GramsOpenCode` directly from
-`grams_opencode.grams_opencode`.
+`grams-opencode.grams_opencode`.
 
 The Harbor adapter runs during trial setup. It installs the pinned OpenCode
 version, writes the plugin into the trial's
@@ -175,7 +176,7 @@ plugin using its standard plugin discovery mechanism. The adapter does not
 interpret OpenCode events itself.
 
 The plugin runs in the same trial container as OpenCode. Its source is kept in
-the repository under `grams_opencode/opencode_plugin`, while the adapter
+the repository under `grams-opencode/opencode_plugin`, while the adapter
 embeds and writes that source into the trial at setup time. This is required
 because a containerized OpenCode process cannot load a plugin that exists only
 on the host unless the source is explicitly mounted or copied into the trial.

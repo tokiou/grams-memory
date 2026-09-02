@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tokiou/grams-memory/grams-app/memory_mcp/internal/platform/sqlite"
+	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/platform/sqlite"
 )
 
 func TestHierarchyMemoryAndEdges(t *testing.T) {
