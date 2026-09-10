@@ -1,1 +1,7 @@
 harbor==0.16.1
+fastapi==0.141.1
+uvicorn==0.52.4
+aiosqlite==0.22.1
+langgraph==0.6.11
+langgraph-checkpoint-sqlite==3.0.3
+httpx==0.28.1

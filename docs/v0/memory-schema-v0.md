@@ -1,7 +1,51 @@
+Project
+{
+    id,
+    name,
+    description,
+
+    metadata: {
+        created_at,
+        updated_at
+    }
+}
+
+
+Key
+{
+    id,
+    project_id,
+
+    name,
+    description,
+
+    metadata: {
+        created_at,
+        updated_at
+    }
+}
+
+
+Category
+{
+    id,
+    key_id,
+
+    name,
+    description,
+
+    metadata: {
+        created_at,
+        updated_at
+    }
+}
+
+
 MemoryNode
 {
     id,
     category_id,
+
     content,
 
     type: [
@@ -32,6 +76,11 @@ MemoryNode
             VALIDATED
         ],
 
+        graph_tier: [
+            ACTIVE,
+            COLD
+        ],
+
         avoid: [
             REPEAT,
             REREAD,
@@ -40,9 +89,12 @@ MemoryNode
         ],
 
         confidence,
+
         source,
+
         created_at,
-        updated_at
+        updated_at,
+        archived_at
     }
 }
 
@@ -50,6 +102,7 @@ MemoryNode
 MemoryEdge
 {
     id,
+
     source,
     target,
 
@@ -76,7 +129,9 @@ MemoryEdge
         ],
 
         direct,
+
         source,
+
         created_at
     }
 }

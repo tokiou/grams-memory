@@ -18,18 +18,18 @@ services:
       OPENCODE_CONFIG_CONTENT: >-
         {
           "$$schema": "https://opencode.ai/config.json",
-          "model": "modelapi/${MODEL_DEPLOYMENT}",
+          "model": "openrouter/${OPENROUTER_DEPLOYMENT}",
           "provider": {
-            "modelapi": {
+            "openrouter": {
               "npm": "@ai-sdk/openai-compatible",
-              "name": "Model API",
+              "name": "OpenRouter",
               "options": {
-                "baseURL": "{env:MODEL_BASE_URL}",
-                "apiKey": "{env:MODEL_API_KEY}"
+                "baseURL": "{env:OPENROUTER_BASE_URL}",
+                "apiKey": "{env:OPENROUTER_API_KEY}"
               },
               "models": {
-                "${MODEL_DEPLOYMENT}": {
-                  "name": "${MODEL_DEPLOYMENT}"
+                "${OPENROUTER_DEPLOYMENT}": {
+                  "name": "${OPENROUTER_DEPLOYMENT}"
                 }
               }
             }

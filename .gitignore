@@ -1,6 +1,8 @@
 .env
 jobs/
 .harbor-home/
+.cache/opencode/
 no-upload
 __pycache__/
 *.py[cod]
+AGENTS.md

@@ -15,6 +15,7 @@ var (
 )
 
 type MemoryFilter struct {
+	Query         string
 	ProjectID     *ProjectID
 	KeyID         *KeyID
 	CategoryID    *CategoryID

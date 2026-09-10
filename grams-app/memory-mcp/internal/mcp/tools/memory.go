@@ -47,6 +47,7 @@ type edgeInput struct {
 	Source           string                  `json:"source,omitempty"`
 }
 type searchInput struct {
+	Query         string                `json:"query,omitempty"`
 	ProjectID     *memory.ProjectID     `json:"project_id,omitempty"`
 	KeyID         *memory.KeyID         `json:"key_id,omitempty"`
 	CategoryID    *memory.CategoryID    `json:"category_id,omitempty"`
@@ -137,7 +138,7 @@ func RegisterMemoryTools(s *mcp.Server, svc *memory.Service, graph *memory.Graph
 		return nil, m, e
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_search", Description: "Search memories"}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, []memory.Memory, error) {
-		m, e := svc.Search(ctx, memory.MemoryFilter{ProjectID: in.ProjectID, KeyID: in.KeyID, CategoryID: in.CategoryID, Types: in.Types, Statuses: in.Statuses, GraphTiers: in.GraphTiers, Avoid: in.Avoid, MinConfidence: in.MinConfidence, Limit: in.Limit, Offset: in.Offset})
+		m, e := svc.Search(ctx, memory.MemoryFilter{Query: in.Query, ProjectID: in.ProjectID, KeyID: in.KeyID, CategoryID: in.CategoryID, Types: in.Types, Statuses: in.Statuses, GraphTiers: in.GraphTiers, Avoid: in.Avoid, MinConfidence: in.MinConfidence, Limit: in.Limit, Offset: in.Offset})
 		return nil, m, e
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_archive", Description: "Archive a memory"}, func(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, memory.Memory, error) {

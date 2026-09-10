@@ -1,0 +1,60 @@
+"""FastAPI event ingress. It never executes the Supervisor graph."""
+
+import json
+import logging
+import math
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
+
+from ..inbox import SupervisorEventInput
+from ..observability import emit
+
+logger = logging.getLogger(__name__)
+
+
+def _reject_nonstandard_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _validate_finite_json(value: object) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("JSON numbers must be finite")
+    if isinstance(value, list):
+        for item in value:
+            _validate_finite_json(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _validate_finite_json(item)
+
+
+def register_event_routes(app: FastAPI) -> None:
+    @app.post("/events", status_code=202)
+    async def receive_event(request: Request) -> Response:
+        if not getattr(request.app.state, "accepting", True):
+            return JSONResponse(status_code=503, content={"detail": "event inbox is shutting down"})
+        body = await request.body()
+        try:
+            payload = json.loads(body, parse_constant=_reject_nonstandard_constant)
+            _validate_finite_json(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"detail": "request body must be JSON"})
+
+        event = None
+        try:
+            event = SupervisorEventInput.from_payload(payload)
+            emit(logger, logging.INFO, "event_received", ingress_id=event.ingress_id, source_event_id=event.id, session_id=event.session_id,
+                 root_session_id=event.root_session_id, event_type=event.type,
+                 source_event=event.source_event, source_run_id=event.run_id)
+            event_id = await request.app.state.inbox.persist(event)
+        except Exception:
+            emit(logger, logging.ERROR, "event_persistence_failed", event_type=getattr(event, "type", None),
+                 error="persistence_failed")
+            return JSONResponse(status_code=503, content={"detail": "event inbox unavailable"})
+        try:
+            request.app.state.runtime.notify()
+        except Exception:
+            emit(logger, logging.ERROR, "runtime_wakeup_failed", event_id=event_id,
+                 error="notify_failed")
+        return Response(status_code=202)

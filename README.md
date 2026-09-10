@@ -137,7 +137,10 @@ The size limits of Keys, Categories, memories, and the Active Graph are delibera
 
 ## Memory Manifest
 
-A project-level Manifest.md is planned as a human- and agent-readable description of how memory is organized for that project.
+A runtime Memory Manifest is built from the project, Keys, and Categories exposed by
+the Go MCP server and supplied to the Supervisor on every graph review. A future
+`Manifest.md` may still provide human-authored descriptions and constraints that are
+not represented in the database.
 
 The manifest may describe:
 
@@ -147,7 +150,9 @@ The manifest may describe:
 - the purpose and scope of each Category;
 - organizational constraints used by the Memory Supervisor.
 
-Its exact format and update policy are still under investigation.
+The runtime format is a compact JSON object containing projects, Keys, Categories,
+identifiers, descriptions, and category scope. Its human-authored extension and
+update policy remain under investigation.
 
 ## MCP Interface
 
@@ -289,18 +294,18 @@ Initial experiments will use:
 | Item | Selection |
 | --- | --- |
 | Benchmark | Terminal-Bench 2.0 |
-| Model | Qwen3.6-35B-A3B |
+| Model | DeepSeek V4 Flash 0731 (`deepseek/deepseek-v4-flash-0731`) via OpenRouter |
 | Agent harness | OpenCode |
 | Primary metric | Pass@1 |
 
 The core comparison keeps the action model and harness fixed:
 
 ```text
-Qwen3.6-35B-A3B + OpenCode + Memory OFF
+DeepSeek V4 Flash 0731 + OpenCode + Memory OFF
 
                         vs.
 
-Qwen3.6-35B-A3B + OpenCode + GRAMS
+DeepSeek V4 Flash 0731 + OpenCode + GRAMS
 ```
 
 Additional metrics may include:
@@ -342,3 +347,71 @@ The immediate goals are:
 - evaluate graph-conditioned retrieval before adding more complex policies.
 
 The methodology and architecture are expected to evolve as the research progresses.
+
+## Local Supervisor
+
+The Supervisor uses the Go MCP server over Streamable HTTP. For the Harbor
+path, `GramsOpenCode` publishes port `4096`, starts `opencode serve` inside the
+trial, and runs the task through `--attach`, so the Supervisor reaches the
+same OpenCode session over the host port. Load the ignored local configuration:
+
+The review model is configured through OpenRouter. The current deployment is
+`deepseek/deepseek-v4-flash-0731`, pinned to the `coreweave/fp8` provider
+endpoint with fallbacks disabled:
+
+```env
+OPENROUTER_DEPLOYMENT=deepseek/deepseek-v4-flash-0731
+OPENROUTER_API_KEY=your-api-key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENCODE_BASE_URL=http://127.0.0.1:4096
+```
+
+Inference requests include:
+
+```json
+{"provider":{"order":["coreweave/fp8"],"allow_fallbacks":false}}
+```
+
+```bash
+set -a; source .env; set +a
+```
+
+Start the services in separate terminals from the repository root:
+
+```bash
+go run ./grams-app/memory-mcp/cmd/server
+```
+
+```bash
+set -a; source .env; set +a
+.venv/bin/uvicorn supervisor.app:app --app-dir grams-app/supervisor --host 0.0.0.0 --port 8765
+```
+
+Set `GRAMS_LOG_LEVEL=DEBUG` to see every node and external call. Console logs
+are colorized automatically on a TTY; use `GRAMS_LOG_COLOR=always` or
+`GRAMS_LOG_COLOR=never` to force a mode. Set `GRAMS_LOG_LAG_WARN_MS` to emit a
+warning when queue or OpenCode source lag exceeds that many milliseconds. Set
+`GRAMS_LOG_FILE=/tmp/grams-supervisor.log` to duplicate the same logs to a
+plain-text file for post-run analysis.
+Every operational line includes a stable `event_name` and, when available,
+event/session/run correlation fields and duration measurements. Payloads,
+messages, tool arguments, and credentials are intentionally omitted.
+
+The Supervisor reaches OpenCode at `OPENCODE_BASE_URL`, while the Harbor trial
+reaches `GRAMS_EVENT_ENDPOINT` independently. Use the wrapper so every Harbor
+trial publishes the OpenCode control port:
+
+The wrapper also prepares the pinned OpenCode `1.18.22` Linux binary in
+`.cache/opencode/` from the GitHub release. The trial mounts that artifact
+read-only and never runs `https://opencode.ai/install` at runtime. A failed cache
+download is retried with backoff; if it remains unavailable, the trial reports a
+typed infrastructure error rather than an action-agent failure.
+
+```bash
+scripts/run_harbor_supervised.sh \
+  --config /Users/franciscovega/fran-proyects/grams-memory/grams-app/tests/receptor-opencode/test_job.json \
+  --job-name grams-full-flow \
+  --yes \
+  --disable-verification \
+  --n-concurrent-trials 1
+```

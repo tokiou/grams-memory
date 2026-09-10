@@ -309,6 +309,25 @@ func (r *MemoryRepository) Find(ctx context.Context, f MemoryFilter) ([]Memory, 
 		where = append(where, "m.category_id=?")
 		args = append(args, *f.CategoryID)
 	}
+	if strings.TrimSpace(f.Query) != "" {
+		terms := strings.Fields(strings.ToLower(f.Query))
+		var clauses []string
+		for _, term := range terms {
+			term = strings.Trim(term, ".,:;!?()[]{}\"'")
+			if len([]rune(term)) < 3 {
+				continue
+			}
+			clauses = append(clauses, "(LOWER(m.content) LIKE ? OR LOWER(m.title) LIKE ? OR LOWER(m.description) LIKE ?)")
+			query := "%" + term + "%"
+			args = append(args, query, query, query)
+			if len(clauses) == 8 {
+				break
+			}
+		}
+		if len(clauses) > 0 {
+			where = append(where, "("+strings.Join(clauses, " OR ")+")")
+		}
+	}
 	addIn := func(col string, vals []string) {
 		if len(vals) == 0 {
 			return

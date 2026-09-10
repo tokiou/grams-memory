@@ -216,11 +216,11 @@ For the current receiver smoke test, the plugin sends JSON events using HTTP
 `POST` to `/events`. The local Python receiver is implemented in:
 
 ```text
-grams-app/supervisor/event_server.py
+grams-app/supervisor/supervisor/app.py
 ```
 
-The receiver only prints each JSON event. It is intentionally not yet a
-Memory Supervisor and does not classify, persist, or modify events.
+The receiver durably persists each JSON event in the Supervisor Inbox and
+processes it asynchronously without blocking the HTTP response on external work.
 
 During local development, Harbor and OpenCode run in Docker while the Python
 receiver runs on the host. Docker Desktop/Colima exposes the host receiver to
@@ -236,9 +236,9 @@ The integration test at:
 grams-app/tests/receptor-opencode/run_test.py
 ```
 
-starts the local receiver automatically and runs a small Harbor task. The
-test is intended to verify that OpenCode loads the plugin and that normalized
-events reach the host process.
+starts Uvicorn with the `supervisor.app:app` ASGI application automatically and
+runs a small Harbor task. The test is intended to verify that OpenCode loads
+the plugin and that normalized events reach the host process.
 
 The following pieces are deliberately not implemented yet:
 

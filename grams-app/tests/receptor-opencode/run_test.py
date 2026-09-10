@@ -11,16 +11,34 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TEST_DIR = Path(__file__).resolve().parent
-SERVER = ROOT / "grams-app" / "supervisor" / "event_server.py"
+SERVER_DIR = ROOT / "grams-app" / "supervisor"
 CONFIG = TEST_DIR / "test_job.json"
+CACHE_SCRIPT = ROOT / "scripts" / "cache_opencode.sh"
 
 
 def main() -> int:
     env = os.environ.copy()
     env.setdefault("GRAMS_EVENT_ENDPOINT", "http://host.docker.internal:8765/events")
-    server = subprocess.Popen([sys.executable, str(SERVER)], env=env)
+    server = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "supervisor.app:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8765",
+            "--app-dir",
+            str(SERVER_DIR),
+        ],
+        env=env,
+    )
     try:
         time.sleep(0.5)
+        cache = subprocess.run([str(CACHE_SCRIPT)], cwd=ROOT, env=env)
+        if cache.returncode != 0:
+            print("OpenCode cache preparation failed; Harbor should report infrastructure failure.", file=sys.stderr)
         command = [
             "docker",
             "compose",
