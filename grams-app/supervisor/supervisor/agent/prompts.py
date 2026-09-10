@@ -134,8 +134,13 @@ not inside it:
 
 Choose exactly one action: READ_INBOX, MEMORY_OPERATION, INTERVENE, or DONE.
 
-READ_INBOX incorporates newly claimed events before any other work. Do not ignore
-claimed events.
+The runtime enters REVIEW to route the next step. At the decision boundary, claimed
+events always have absolute priority: return READ_INBOX immediately and do not ask
+the model to choose memory work or an intervention first. READ_INBOX incorporates
+the claimed events and routes back to REVIEW with the updated operational state.
+Do not ignore, summarize, or persist claimed events before READ_INBOX has processed
+them. The runtime may prepare minimal session metadata before this routing decision,
+but no model decision should override the READ_INBOX requirement.
 
 MEMORY_OPERATION performs exactly one MCP memory operation. Before create or update,
 search the current project/key/category scope unless the current context already
@@ -205,8 +210,22 @@ the outer action `INTERVENE`, even if the same context also contains useful fact
 persist; persist them in a later REVIEW after the agent responds.
 
 DONE is valid only when there is no meaningful unpersisted knowledge, no justified
-intervention, and no pending operation. If a create, update, link, archive, or restore
-operation was completed for the current batch, DONE is normally the next action.
+intervention, no pending memory operation, and no pending intervention request. If a
+create, update, link, archive, or restore operation was completed for the current
+batch, inspect its result before choosing DONE; persist a follow-up link or evidence
+when required by the result.
+
+## Review order
+
+Apply this order at every REVIEW decision:
+
+1. If claimed events are present, choose READ_INBOX and nothing else.
+2. If a memory link or other memory operation is pending, choose MEMORY_OPERATION
+   and complete it before choosing DONE.
+3. Use the scoped memory manifest and retrieved memories before deciding whether new
+   knowledge is a duplicate, needs updating, or should be created.
+4. Evaluate intervention only from concrete evidence in the current context.
+5. Choose DONE only after the previous conditions are clear.
 
 ## Response contract
 
