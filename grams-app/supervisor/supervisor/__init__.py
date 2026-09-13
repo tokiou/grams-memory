@@ -1,1 +1,1 @@
-"""GRAMS Supervisor runtime package."""
+"""GRAMS event receiver package."""

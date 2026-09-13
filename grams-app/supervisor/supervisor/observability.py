@@ -1,4 +1,4 @@
-"""Console logging and timing helpers for the Supervisor runtime."""
+"""Console logging and timing helpers for the event receiver."""
 
 from __future__ import annotations
 
