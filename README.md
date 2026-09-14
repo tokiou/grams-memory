@@ -1,417 +1,616 @@
-# GRAMS
-
-> Graph-Relational Agent Memory Supervisor
-
-GRAMS is a research project exploring memory mechanisms for long-horizon AI agents.
-
-The project investigates whether an external graph-based memory system can help agents preserve and reuse relevant information across long execution trajectories while keeping the underlying action agent unchanged.
+GRAMS
+
+GRAMS is a supervisor-managed relational execution memory system for long-horizon agents.
+
+The Action Agent (currently OpenCode) remains focused on solving the task. A separate Supervisor observes its execution, organizes important execution knowledge into a graph-backed Memory MCP, and uses that memory to decide whether the agent should continue, reconsider, or receive an intervention.
+
+The central design principle is:
+
+The Supervisor must not review the current execution while ignoring the memory of the process it is supervising.
+
+Every meaningful review is therefore conditioned on an up-to-date view of the current process graph.
+
+Architecture
+
+OpenCode
+   |
+   | normalized execution events
+   v
+OpenCode plugin
+   |
+   | POST /events
+   v
+FastAPI receiver
+   |
+   v
+SQLite Inbox
+   |
+   v
+Supervisor Runtime
+   |
+   v
+LangGraph
+   |
+   +-----------------------------+
+   |                             |
+   | every meaningful REVIEW     | memory writes / graph updates
+   v                             v
+Current Process Context <---- Memory MCP
+   |                             |
+   | compact graph view          | SQLite graph memory
+   v                             |
+Supervisor REVIEW ---------------+
+   |
+   +--> SILENT / CONTINUE
+   |
+   +--> EXPAND MEMORY
+   |
+   +--> INTERVENE --> OpenCode
+   |
+   +--> CLOSE PROCESS
+            |
+            v
+         SUMMARY
+            |
+            v
+      START NEXT PROCESS
 
-## Idea
+The Action Agent does not manage its own long-term memory.
 
-Long-horizon agents operate across many steps, tool calls, observations, failures, intermediate decisions, and partial discoveries.
+The Supervisor owns the memory lifecycle:
 
-As trajectories grow, information discovered earlier may stop influencing future actions effectively.
+observe execution
+    ->
+identify the active process
+    ->
+store strategy and evidence
+    ->
+create typed relations
+    ->
+re-read the active process graph
+    ->
+evaluate accumulated evidence
+    ->
+continue, retrieve more context, or intervene
 
-GRAMS explores an architecture where a separate Memory Supervisor observes the action-agent trajectory and interacts with an external relational memory system through MCP.
+Core Concepts
 
-```text
-Action Agent
-     │
-     │ trajectory
-     ▼
-Memory Supervisor
-     │
-     │ MCP
-     ▼
-Graph Memory
-```
+Project
 
-The memory system evolves during execution and is intended to represent not only individual memories, but also relationships between information discovered throughout the trajectory.
-
-The exact memory representation, graph structure, retrieval strategy, scoring mechanism, storage policy, and intervention policy are still research questions.
+A Project is the memory scope associated with one supervised task or execution session.
 
-## Current Architecture Hypothesis
+All processes and their memories belong to the same Project.
 
-Memory is organized per project or repository.
+Key
 
-```text
-Project / Repository
-        │
-        ├── Key
-        │    ├── Category
-        │    │     └── Graph of Memories
-        │    └── Category
-        │          └── Graph of Memories
-        │
-        └── Key
-             └── ...
-```
+A Key represents a coherent execution process.
 
-A project contains a set of Keys. Each Key contains a set of Categories.
+A process is a strategy or line of work pursued toward a goal or subgoal. It is not a single command, tool call, or reasoning message.
 
-Within each Category, memories form a graph and may be connected to one another. When useful, memories may also form relationships with memories belonging to other Categories.
+Examples:
 
-The intended structure is therefore locally organized by Category while still allowing cross-category relations when the Memory Supervisor considers them relevant.
+process_001_python_bruteforce
+process_002_compiled_search
+process_003_validate_round_keys
 
-## Preliminary Data Model
+A process should remain active while the agent is pursuing substantially the same strategy.
 
-The current data model is intentionally minimal and expected to evolve.
+A new process is created when the execution meaningfully pivots to a different strategy or line of work.
 
-### Key
-```json
-{
-    id,
-    key_name,
-    metadata
-}
-```
+objective is a special Key reserved for task-level requirements and constraints that apply across processes.
 
-### Category
-```json
-{
-    id,
-    key_id,
-    category_name,
-    metadata
-}
-```
+Category
 
-### Memory Node
-```json
-{
-    id,
-    category_id,
-    content,
-    metadata
-}
-```
+Each process uses a small fixed ontology.
 
-### Memory Edge
-```json
-{
-    source,
-    target,
-    relation,
-    metadata
-}
-```
+process_N
+├── strategy
+├── evidence
+└── summary
 
-The semantics of a memory node, the taxonomy of relations, and the metadata stored on nodes and edges are not fixed yet.
+The Supervisor must not invent arbitrary categories.
 
-In particular, GRAMS is still investigating:
+STRATEGY
 
-- what should constitute a single memory;
+Describes what the agent is trying to do and how the approach evolves.
 
-- how atomic or abstract a memory should be;
+Typical content includes:
 
-- which information from an agent trajectory deserves persistence;
+current plan;
 
-- what relationships should exist between memories;
+important attempts;
 
-- what metadata should be stored on nodes and edges.
+decisions;
 
-## Active and Cold Memory
+pivots;
 
-GRAMS currently considers a two-tier memory organization.
+interventions that change the direction of the process.
 
-```text
-GRAMS Memory
-     │
-     ├── Active Graph
-     │     - small
-     │     - fast
-     │     - supervised
-     │     - frequently retrieved
-     │
-     └── Cold Memory
-           - larger
-           - historical
-            - exceptional / infrequent
-```
+EVIDENCE
 
-The Active Graph is intended to contain information likely to be useful during the current execution horizon.
+Describes what execution has demonstrated.
 
-Cold Memory may preserve older, exceptional, or less frequently accessed information that can be restored when needed.
+Typical content includes:
 
-The size limits of Keys, Categories, memories, and the Active Graph are deliberately left open for empirical evaluation.
+discoveries;
 
-## Memory Manifest
+errors;
 
-A runtime Memory Manifest is built from the project, Keys, and Categories exposed by
-the Go MCP server and supplied to the Supervisor on every graph review. A future
-`Manifest.md` may still provide human-authored descriptions and constraints that are
-not represented in the database.
+measured behavior;
 
-The manifest may describe:
+partial results;
 
-- existing Keys;
-- the purpose of each Key;
-- existing Categories;
-- the purpose and scope of each Category;
-- organizational constraints used by the Memory Supervisor.
+failed assumptions;
 
-The runtime format is a compact JSON object containing projects, Keys, Categories,
-identifiers, descriptions, and category scope. Its human-authored extension and
-update policy remain under investigation.
+validations;
 
-## MCP Interface
+evidence for or against continuing the current strategy.
 
-GRAMS plans to expose the graph memory system through a small set of MCP tools.
+SUMMARY
 
-Initial candidate tools include:
+A compact description generated when a process is closed or superseded.
 
-### Candidate Tools
+The Summary should preserve the decision-relevant outcome of the process without deleting the underlying memories.
 
-| Tool | Purpose |
-| --- | --- |
-| `memory_search(query, filters)` | Search memory semantically and/or structurally. |
-| `memory_get(id)` | Retrieve a complete memory node. |
-| `memory_create(...)` | Create a new memory node. |
-| `memory_update(id, ...)` | Update or refine an existing memory. |
-| `memory_link(source, target, relation, ...)` | Create a relation between two memories. |
-| `memory_neighbors(id, relation?, depth?)` | Traverse neighboring memories in the graph. |
-| `memory_archive(id)` | Move a memory out of the Active Graph. |
-| `memory_restore(id)` | Restore a memory from Cold Memory. |
-| `memory_supersede(old, new)` | Mark old information as replaced by newer information. |
-| `memory_context(...)` | Build a compact graph-conditioned context for the current agent state. |
+Example:
 
-These tools are preliminary.
+Python brute force was abandoned because measured throughput was
+insufficient for the required search space. The implementation was
+functionally correct, but repeated optimization produced only marginal
+improvement. The next process moved the search loop to compiled code.
 
-Low-level memory primitives and higher-level retrieval or context-construction policies may later be separated so that retrieval strategies can be evaluated independently.
+Future reviews should prefer the Summary first and expand the underlying graph only when more detail is required.
 
-## Graph-Conditioned Retrieval
+Process Lifecycle
 
-One of the main ideas being explored is whether graph structure can recover useful information that semantic similarity alone would miss.
+A process can be:
 
-A semantic search may identify a relevant anchor memory:
+ACTIVE
+SUCCEEDED
+FAILED
+SUPERSEDED
+ABANDONED
 
-```text
-query
-  │
-  ▼
-Memory 17
-```
+Typical lifecycle:
 
-GRAMS may then use graph relations to recover a broader relevant subgraph:
+START PROCESS
+     |
+     v
+   ACTIVE
+     |
+     +--> accumulate STRATEGY
+     |
+     +--> accumulate EVIDENCE
+     |
+     +--> create typed relations
+     |
+     v
+Supervisor evaluates accumulated evidence
+     |
+     +--> continue same process
+     |
+     +--> intervene but keep process
+     |
+     +--> close process
+              |
+              v
+          write SUMMARY
+              |
+              v
+       start next process
 
-```text
-Memory 17 ─── Memory 8 ─── Memory 31
-```
+A process should not be closed only because time has passed.
 
-Conceptually:
+It should be closed when the accumulated evidence supports that the strategy succeeded, failed, was abandoned, or was superseded.
 
-```text
-[
- q_t \rightarrow M_{17} \rightarrow {M_{17}, M_8, M_{31}}
- ]
-```
+Mandatory Memory Consumption
 
-The hypothesis is that memories with low direct semantic similarity to the current query may still be useful because of their structural relationship to a retrieved memory.
+The Memory MCP is not an optional tool that the Supervisor may ignore.
 
-Possible retrieval strategies include:
+Before every meaningful REVIEW, the system must provide the Supervisor with an up-to-date representation of the active process graph.
 
-- semantic retrieval only;
+The Supervisor must therefore always reason from:
 
-- semantic retrieval + 1-hop graph expansion;
+recent execution
++
+current process graph
 
-- semantic retrieval + multi-hop traversal;
+and not from recent trajectory alone.
 
-- adaptive traversal conditioned on query and graph relevance.
+This rule is deterministic and belongs to the orchestration flow, not to the LLM prompt.
 
-## Open Research Questions
+Minimum Current Process Context
 
-GRAMS currently focuses on questions such as:
+The normal review context should include a compact graph-derived view such as:
 
-- What information should an agent remember?
+CURRENT PROCESS
+process_001_python_bruteforce
+status: ACTIVE
 
-- What constitutes a useful memory for a coding agent?
+CURRENT STRATEGY
+- brute-force FEAL round keys in Python
+- optimize candidate evaluation loop
 
-- How atomic should a memory be?
+EVIDENCE FOR CONTINUING
+- implementation appears functionally correct
 
-- When should a memory be created, updated, merged, archived, or discarded?
+EVIDENCE AGAINST CONTINUING
+- measured throughput remains insufficient
+- no round key has been recovered
+- latest optimization produced only marginal improvement
 
-- How should memories be represented and connected?
+UNRESOLVED
+- current strategy has not produced a partial key
 
-- Which relations between memories are useful for future retrieval?
+IMPORTANT RELATIONS
+- python_bruteforce FAILED_BECAUSE insufficient_throughput
+- optimization TESTED_BY benchmark_result
 
-- When should cross-category relations be created?
+RECENT MEMORY CHANGES
+- new evidence: optimization improved throughput only marginally
 
-- How should relevant graph neighborhoods be retrieved?
+This representation is a view derived from the graph. It is not a second private memory maintained by the Supervisor.
 
-- When should retrieved memories be injected into the action-agent context?
+Context Depth
 
-- When should the Memory Supervisor remain silent?
+GRAMS should avoid loading the entire memory graph into every prompt.
 
-- How should Active and Cold Memory be managed?
+Memory is consumed progressively.
 
-- What memory budgets are useful for long-horizon tasks?
+Level 0 — Current Process Index
 
-## Memory Discovery Phase
+Used during normal reviews.
 
-Before fixing the final memory schema, GRAMS will use baseline agent trajectories to study what information has future utility.
+Contains a compact view of:
 
-The initial process is:
+active process;
 
-```text
-Baseline trajectories
-        │
-        ▼
-Long-horizon failure analysis
-        │
-        ▼
-Candidate memory identification
-        │
-        ▼
-Counterfactual memory injection
-        │
-        ▼
-Empirical memory taxonomy
-        │
-        ▼
-GRAMS memory design
-```
+strategy titles;
 
-A central question is:
+evidence titles;
 
-What information discovered earlier in a trajectory would change a later agent decision if it were made available again?
+important relations;
 
-This is intended to guide the eventual memory schema using empirical evidence rather than defining memory types only from intuition.
+current process status;
 
-## Research Goal
+recent memory changes;
 
-The central research hypothesis is that an external Memory Supervisor with structured relational memory can improve long-horizon agent behavior without modifying the underlying action agent.
+process summary when available.
 
-The project aims to study three related components:
+The goal is to keep normal memory cost small.
 
-- **Memory representation:** what information should be persisted and how it should be structured.
-- **Graph-conditioned retrieval:** whether memory relations improve retrieval beyond semantic similarity alone.
-- **Memory-conditioned supervision:** when and how retrieved information should influence the action agent.
+Level 1 — Expanded Current Process
 
-## Evaluation
+Triggered when the current process requires deeper evaluation.
 
-Initial experiments will use:
+Examples:
 
-| Item | Selection |
-| --- | --- |
-| Benchmark | Terminal-Bench 2.0 |
-| Model | DeepSeek V4 Flash 0731 (`deepseek/deepseek-v4-flash-0731`) via OpenRouter |
-| Agent harness | OpenCode |
-| Primary metric | Pass@1 |
+POSSIBLE_PROGRESS_STALL
+POSSIBLE_RESEARCH_LOOP
+POSSIBLE_HYPOTHESIS_OSCILLATION
 
-The core comparison keeps the action model and harness fixed:
+The system expands the relevant Strategy and Evidence memories before the Supervisor decides whether to intervene.
 
-```text
-DeepSeek V4 Flash 0731 + OpenCode + Memory OFF
+Level 2 — Related Process Neighborhood
 
-                        vs.
+Used when the active process alone is insufficient.
 
-DeepSeek V4 Flash 0731 + OpenCode + GRAMS
-```
+The Supervisor may inspect related previous processes and memories through relations such as:
 
-Additional metrics may include:
+SUPERSEDES
+FAILED_BECAUSE
+DEPENDS_ON
+CONTRADICTS
+SUPPORTS
+TESTED_BY
+PRODUCED
+VALIDATES
 
-- token usage;
-- agent steps;
-- memory operations;
-- retrieval operations;
-- intervention count;
-- task cost;
-- latency.
+This allows the Supervisor to reconstruct decision-relevant history without loading the entire execution trajectory.
 
-Planned ablations may compare:
+Progress Signals
 
-```text
-Baseline
-  vs.
-Semantic / flat memory
-  vs.
-Graph-conditioned retrieval
-  vs.
-Full GRAMS supervision
-```
+GRAMS distinguishes activity from meaningful progress.
 
-This is intended to separate gains caused by memory availability from gains caused specifically by graph structure or active supervision.
+Examples:
 
-## Current Status
+installing a package
+    -> activity
 
-GRAMS is currently in the exploratory stage.
+discovering that a hypothesis is false
+    -> knowledge gain
 
-The immediate goals are:
+producing a new candidate artifact
+    -> progress
 
-- establish a reproducible Terminal-Bench 2.0 baseline;
-- collect complete agent trajectories;
-- analyze long-horizon failures and successful information reuse;
-- identify candidate memory units empirically;
-- design the first minimal GRAMS memory schema;
-- implement the initial MCP memory primitives;
-- evaluate graph-conditioned retrieval before adding more complex policies.
+successfully validating a candidate
+    -> strong progress
 
-The methodology and architecture are expected to evolve as the research progresses.
+Operational signals may identify situations that deserve deeper memory review:
 
-## Local Supervisor
+POSSIBLE_PROGRESS_STALL
+POSSIBLE_RESEARCH_LOOP
+POSSIBLE_HYPOTHESIS_OSCILLATION
+DELIVERABLE_MISSING
+VALIDATION_MISSING
 
-The Supervisor uses the Go MCP server over Streamable HTTP. For the Harbor
-path, `GramsOpenCode` publishes port `4096`, starts `opencode serve` inside the
-trial, and runs the task through `--attach`, so the Supervisor reaches the
-same OpenCode session over the host port. Load the ignored local configuration:
+These signals are not decisions.
 
-The review model is configured through OpenRouter. The current deployment is
-`deepseek/deepseek-v4-flash-0731`, pinned to the `coreweave/fp8` provider
-endpoint with fallbacks disabled:
+They do not automatically cause an intervention.
 
-```env
-OPENROUTER_DEPLOYMENT=deepseek/deepseek-v4-flash-0731
-OPENROUTER_API_KEY=your-api-key
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENCODE_BASE_URL=http://127.0.0.1:4096
-```
+They only force the Supervisor to inspect more graph context before deciding.
 
-Inference requests include:
+Process Persistence Review
 
-```json
-{"provider":{"order":["coreweave/fp8"],"allow_fallbacks":false}}
-```
+A process that remains active for a significant amount of time without meaningful progress should trigger:
 
-```bash
-set -a; source .env; set +a
-```
+POSSIBLE_PROGRESS_STALL
 
-Start the services in separate terminals from the repository root:
+The response is:
 
-```bash
-go run ./grams-app/memory-mcp/cmd/server
-```
+same process persists
+        |
+        v
+POSSIBLE_PROGRESS_STALL
+        |
+        v
+mandatory deeper MCP review
+        |
+        v
+expanded Strategy + Evidence
+        |
+        v
+Supervisor evaluates:
+"is continuing this strategy still justified?"
+        |
+        +--> YES -> SILENT / CONTINUE
+        |
+        +--> UNCERTAIN -> EXPAND RELATED GRAPH
+        |
+        +--> NO -> INTERVENE / CLOSE PROCESS
 
-```bash
-set -a; source .env; set +a
-.venv/bin/uvicorn supervisor.app:app --app-dir grams-app/supervisor --host 0.0.0.0 --port 8765
-```
+Elapsed time never directly justifies an intervention.
 
-Set `GRAMS_LOG_LEVEL=DEBUG` to see every node and external call. Console logs
-are colorized automatically on a TTY; use `GRAMS_LOG_COLOR=always` or
-`GRAMS_LOG_COLOR=never` to force a mode. Set `GRAMS_LOG_LAG_WARN_MS` to emit a
-warning when queue or OpenCode source lag exceeds that many milliseconds. Set
-`GRAMS_LOG_FILE=/tmp/grams-supervisor.log` to duplicate the same logs to a
-plain-text file for post-run analysis.
-Every operational line includes a stable `event_name` and, when available,
-event/session/run correlation fields and duration measurements. Payloads,
-messages, tool arguments, and credentials are intentionally omitted.
+Time only forces a new evaluation of the strategy.
 
-The Supervisor reaches OpenCode at `OPENCODE_BASE_URL`, while the Harbor trial
-reaches `GRAMS_EVENT_ENDPOINT` independently. Use the wrapper so every Harbor
-trial publishes the OpenCode control port:
+The decision must be based on accumulated evidence from the graph.
 
-The wrapper also prepares the pinned OpenCode `1.18.22` Linux binary in
-`.cache/opencode/` from the GitHub release. The trial mounts that artifact
-read-only and never runs `https://opencode.ai/install` at runtime. A failed cache
-download is retried with backoff; if it remains unavailable, the trial reports a
-typed infrastructure error rather than an action-agent failure.
+GRAMS must not use Harbor's remaining timeout, benchmark deadline, or percentage of execution budget to decide whether to intervene.
 
-```bash
-scripts/run_harbor_supervised.sh \
-  --config /Users/franciscovega/fran-proyects/grams-memory/grams-app/tests/receptor-opencode/test_job.json \
-  --job-name grams-full-flow \
-  --yes \
-  --disable-verification \
-  --n-concurrent-trials 1
-```
+Memory-Conditioned Intervention
+
+An intervention should be grounded in stored execution knowledge whenever that knowledge exists.
+
+Bad:
+
+You seem stuck. Reconsider your approach.
+
+Preferred:
+
+The current Python search has not produced a key, and the measured
+throughput stored in the current process remains insufficient despite
+the latest optimization. Continuing the same strategy is not currently
+supported by the accumulated evidence. Reconsider the implementation
+approach before further refinement.
+
+The Supervisor should explain:
+
+what behavior is failing
++
+what stored evidence supports that conclusion
++
+what kind of next action should be reconsidered
+
+The Supervisor should not become a second Action Agent by directly solving the task.
+
+Graph Semantics
+
+The graph should preserve decision-relevant relationships between memories and processes.
+
+Examples:
+
+strategy_A FAILED_BECAUSE evidence_X
+
+strategy_B SUPERSEDES strategy_A
+
+strategy_B PRODUCED result_Y
+
+result_Y VALIDATES strategy_B
+
+attempt_C TESTED_BY validation_Z
+
+process_002 SUPERSEDES process_001
+
+result_R DEPENDS_ON discovery_D
+
+The graph is not only storage.
+
+Relations should affect retrieval and the context presented to the Supervisor.
+
+A retrieved memory may lead to its causal or decision-relevant neighbors even when those neighbors are not semantically similar to the current event.
+
+Review Invariants
+
+The orchestration layer should enforce the following functional rules:
+
+A meaningful REVIEW must never run without a valid view of the active process graph.
+
+A progress-stall review must inspect the current process through the MCP before intervention.
+
+A hypothesis or strategy revisit should inspect relevant prior evidence before intervention.
+
+Closing a process requires generating or updating its Summary.
+
+Starting a new process should preserve the relationship with the previous process when one exists.
+
+Memory failures should not crash the entire Supervisor runtime; they must be observable and recoverable.
+
+Recent trajectory must not replace persistent process memory.
+
+The Action Agent remains unchanged and does not directly manage GRAMS memory.
+
+Target Supervisor Flow
+
+START
+  |
+  v
+READ_INBOX
+  |
+  v
+ENSURE_ACTIVE_PROCESS
+  |
+  v
+UPDATE_PROCESS_MEMORY
+  |
+  v
+LOAD_CURRENT_PROCESS_CONTEXT
+  |
+  v
+DETECT_OPERATIONAL_SIGNALS
+  |
+  v
+REVIEW
+  |
+  +--> CONTINUE / SILENT
+  |
+  +--> NEED_MORE_MEMORY
+  |       |
+  |       v
+  |   EXPAND_GRAPH
+  |       |
+  |       v
+  |     REVIEW
+  |
+  +--> WRITE_MEMORY
+  |
+  +--> INTERVENE
+  |
+  +--> CLOSE_PROCESS
+          |
+          v
+      WRITE_SUMMARY
+          |
+          v
+      START_PROCESS
+
+The exact LangGraph node boundaries are an implementation detail.
+
+The functional requirement is that memory consumption and process lifecycle are enforced by orchestration rather than being optional choices left entirely to the review model.
+
+Components
+
+grams-opencode/opencode_plugin/: sends normalized OpenCode execution events.
+
+grams-app/supervisor/supervisor/api/: HTTP event ingress.
+
+grams-app/supervisor/supervisor/inbox/: durable event journal and lease operations.
+
+grams-app/supervisor/supervisor/runtime/: Supervisor lifecycle.
+
+grams-app/supervisor/supervisor/agent/: LangGraph state, routing, prompts, and review nodes.
+
+grams-app/supervisor/supervisor/memory/: Python Memory MCP integration.
+
+grams-app/supervisor/supervisor/opencode/: OpenCode control/context integration.
+
+grams-app/supervisor/supervisor/platform/sqlite/: Supervisor SQLite setup.
+
+grams-app/memory-mcp/: standalone Go graph-memory MCP.
+
+Current Implementation Status
+
+The durable event transport and SQLite Inbox are already part of the system.
+
+The standalone Go Memory MCP is available as a separate component.
+
+The architecture described above is the target Supervisor design: process-managed graph memory, mandatory current-process context, progressive graph expansion, and memory-conditioned intervention.
+
+Implementation details may evolve, but the functional invariants in this document should remain stable.
+
+Local Setup
+
+Install Python dependencies:
+
+python -m pip install -r requirements.txt
+
+Start the Supervisor API:
+
+.venv/bin/uvicorn supervisor.app:app \
+  --app-dir grams-app/supervisor \
+  --host 0.0.0.0 \
+  --port 8765
+
+The Supervisor database path defaults to:
+
+~/Library/Application Support/grams/supervisor.db
+
+Override it with:
+
+GRAMS_SUPERVISOR_DB_PATH
+
+or:
+
+GRAMS_DB_PATH
+
+Start the Memory MCP:
+
+cd grams-app/memory-mcp
+go run ./cmd/server
+
+Event Contract
+
+The event receiver exposes:
+
+POST /events
+
+Valid JSON is normalized and persisted before the receiver returns 202.
+
+Invalid JSON returns 400.
+
+If the Inbox or SQLite database is unavailable, the receiver returns 503.
+
+The OpenCode plugin endpoint is configured with:
+
+GRAMS_EVENT_ENDPOINT=http://127.0.0.1:8765/events
+
+Verification
+
+pytest -q grams-app/tests/test_event_server.py grams-app/tests/test_observability.py
+
+git diff --check
+
+Research Direction
+
+GRAMS is not intended to be a benchmark-specific planner or a second task-solving agent.
+
+The research question is whether a dedicated Supervisor can maintain and use relational execution memory to preserve decision-relevant state across long-horizon tasks.
+
+The core hypothesis is:
+
+As execution history grows, supervisor-managed relational memory can preserve why strategies succeeded, failed, or were superseded, allowing the Supervisor to make better continuation and intervention decisions without repeatedly loading the full trajectory.
+
+The intended comparison is not simply:
+
+memory vs no memory
+
+but eventually:
+
+baseline action agent
+
+vs
+
+supervisor without persistent memory
+
+vs
+
+supervisor with flat process memory
+
+vs
+
+GRAMS:
+supervisor-managed process graph
++ typed relations
++ progressive graph retrieval
++ memory-conditioned intervention
+
+The graph should matter because it preserves decision structure, not merely because it stores more text.

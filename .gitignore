@@ -5,4 +5,3 @@ jobs/
 no-upload
 __pycache__/
 *.py[cod]
-AGENTS.md

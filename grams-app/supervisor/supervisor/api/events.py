@@ -3,7 +3,6 @@
 import json
 import logging
 import math
-import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -47,14 +46,9 @@ def register_event_routes(app: FastAPI) -> None:
             emit(logger, logging.INFO, "event_received", ingress_id=event.ingress_id, source_event_id=event.id, session_id=event.session_id,
                  root_session_id=event.root_session_id, event_type=event.type,
                  source_event=event.source_event, source_run_id=event.run_id)
-            event_id = await request.app.state.inbox.persist(event)
+            await request.app.state.inbox.persist(event)
         except Exception:
             emit(logger, logging.ERROR, "event_persistence_failed", event_type=getattr(event, "type", None),
                  error="persistence_failed")
             return JSONResponse(status_code=503, content={"detail": "event inbox unavailable"})
-        try:
-            request.app.state.runtime.notify()
-        except Exception:
-            emit(logger, logging.ERROR, "runtime_wakeup_failed", event_id=event_id,
-                 error="notify_failed")
         return Response(status_code=202)

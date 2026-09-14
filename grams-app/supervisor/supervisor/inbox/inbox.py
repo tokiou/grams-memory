@@ -1,4 +1,4 @@
-"""Durable Inbox plus an in-memory wakeup signal."""
+"""Durable event Inbox."""
 
 import asyncio
 from datetime import datetime, timezone
@@ -18,18 +18,13 @@ class EventInbox:
         self.batch_size = batch_size
         self.lease_seconds = lease_seconds
         self.lag_warn_ms = lag_warn_ms
-        self._work = asyncio.Event()
-
     async def initialize(self) -> None:
         await self.repository.initialize()
         await self.repository.recover_unfinished()
-        if await self.repository.count_pending():
-            self._work.set()
 
     async def persist(self, event: SupervisorEventInput) -> str:
         started = monotonic_ns()
         event_id = await self._retry_locked(lambda: self.repository.insert_event(event))
-        self._work.set()
         emit(logger, logging.INFO, "event_persisted", event_id=event_id, session_id=event.session_id,
              root_session_id=event.root_session_id, event_type=event.type,
              ingress_id=event.ingress_id, persist_duration_ms=elapsed_ms(started))
@@ -96,11 +91,11 @@ class EventInbox:
              "event_retry_scheduled" if status and status.value == "PENDING" else "event_failed",
              **event_correlation(after or before), status=status.value if status else None,
              error=error)
-        if status and status.value == "PENDING":
-            self._work.set()
-
     async def pending_roots(self) -> list[str]:
         return await self.repository.pending_roots()
+
+    async def known_roots(self) -> list[str]:
+        return await self.repository.known_roots()
 
     async def claimable_roots(self) -> list[str]:
         return await self.repository.claimable_roots()
@@ -108,9 +103,6 @@ class EventInbox:
     async def fail_processing_for_root(self, root_session_id: str, error: str) -> None:
         for event in await self.repository.processing_for_root(root_session_id):
             await self.mark_failed(event.id, error, lease_id=event.lease_id)
-
-    async def wait_for_work(self) -> None:
-        await self._work.wait()
 
     async def has_pending(self) -> bool:
         return await self.pending_count() > 0
@@ -129,12 +121,6 @@ class EventInbox:
         for event in expired:
             emit(logger, logging.WARNING, "lease_recovered", **event_correlation(event),
                  previous_status=event.status.value)
-        if await self.has_work():
-            self._work.set()
-
-    async def close(self) -> None:
-        self._work.set()
-
     @staticmethod
     async def _retry_locked(operation):
         for attempt in range(60):
