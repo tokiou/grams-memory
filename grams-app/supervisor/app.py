@@ -6,11 +6,11 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from .api import register_event_routes
-from .config import Config
-from .inbox import EventInbox, InboxRepository
-from .platform.sqlite.db import open_connection
-from .observability import configure_logging, elapsed_ms, emit, monotonic_ns
+from supervisor.api import register_event_routes
+from supervisor.config import Config
+from supervisor.inbox import EventInbox, InboxRepository
+from supervisor.platform.sqlite.db import open_connection
+from supervisor.observability import configure_logging, elapsed_ms, emit, monotonic_ns
 
 logger = logging.getLogger(__name__)
 

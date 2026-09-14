@@ -1,5 +1,5 @@
 """Outbound OpenCode control boundary."""
 
-from .client import OpenCodeClient
+from supervisor.opencode.client import OpenCodeClient
 
 __all__ = ["OpenCodeClient"]

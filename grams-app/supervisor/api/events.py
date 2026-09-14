@@ -7,8 +7,8 @@ import math
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from ..inbox import SupervisorEventInput
-from ..observability import emit
+from supervisor.inbox import SupervisorEventInput
+from supervisor.observability import emit
 
 logger = logging.getLogger(__name__)
 

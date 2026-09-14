@@ -6,7 +6,7 @@ import logging
 
 import httpx
 
-from ..observability import elapsed_ms, emit, monotonic_ns
+from supervisor.observability import elapsed_ms, emit, monotonic_ns
 
 logger = logging.getLogger(__name__)
 

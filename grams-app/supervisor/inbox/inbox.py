@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 import logging
 import sqlite3
 
-from .model import SupervisorEvent, SupervisorEventInput
-from .repository import InboxRepository
-from ..observability import elapsed_ms, emit, event_correlation, monotonic_ns, source_lag_info
+from supervisor.inbox.model import SupervisorEvent, SupervisorEventInput
+from supervisor.inbox.repository import InboxRepository
+from supervisor.observability import elapsed_ms, emit, event_correlation, monotonic_ns, source_lag_info
 
 logger = logging.getLogger(__name__)
 
