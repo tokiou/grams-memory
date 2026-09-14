@@ -129,7 +129,7 @@ no sea un TTY.
 
 ## Affected Components
 
-- `grams-app/supervisor/supervisor/app.py` y `config.py`.
+- `grams-app/supervisor/app.py` y `config.py`.
 - `supervisor/api/events.py`, `inbox/`, `runtime/`, `agent/nodes/`,
   `memory/client.py` y `opencode/client.py`.
 - Tests bajo `grams-app/tests/`; no se requiere modificar el smoke test del

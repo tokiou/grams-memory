@@ -216,7 +216,7 @@ For the current receiver smoke test, the plugin sends JSON events using HTTP
 `POST` to `/events`. The local Python receiver is implemented in:
 
 ```text
-grams-app/supervisor/supervisor/app.py
+grams-app/supervisor/app.py
 ```
 
 The receiver durably persists each JSON event in the Supervisor Inbox and

@@ -49,12 +49,12 @@ memory, typed relations, graph retrieval, and memory-conditioned decisions.
 Implemented transport components:
 
 - `grams-opencode/opencode_plugin/`: normalizes and sends OpenCode events.
-- `grams-app/supervisor/supervisor/api/`: validates and receives `POST /events`.
-- `grams-app/supervisor/supervisor/inbox/`: durable event journal, leases,
+- `grams-app/supervisor/api/`: validates and receives `POST /events`.
+- `grams-app/supervisor/inbox/`: durable event journal, leases,
   retries, claims, and acknowledgements.
-- `grams-app/supervisor/supervisor/platform/sqlite/`: SQLite setup.
-- `grams-app/supervisor/supervisor/memory/`: retained Python MCP client.
-- `grams-app/supervisor/supervisor/opencode/`: retained Python OpenCode client.
+- `grams-app/supervisor/platform/sqlite/`: SQLite setup.
+- `grams-app/supervisor/memory/`: retained Python MCP client.
+- `grams-app/supervisor/opencode/`: retained Python OpenCode client.
 - `grams-app/memory-mcp/`: retained standalone Go graph-memory MCP server.
 
 The following agentic components are intentionally not implemented in the

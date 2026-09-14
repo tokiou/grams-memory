@@ -501,19 +501,19 @@ Components
 
 grams-opencode/opencode_plugin/: sends normalized OpenCode execution events.
 
-grams-app/supervisor/supervisor/api/: HTTP event ingress.
+grams-app/supervisor/api/: HTTP event ingress.
 
-grams-app/supervisor/supervisor/inbox/: durable event journal and lease operations.
+grams-app/supervisor/inbox/: durable event journal and lease operations.
 
-grams-app/supervisor/supervisor/runtime/: Supervisor lifecycle.
+grams-app/supervisor/runtime/: Supervisor lifecycle.
 
-grams-app/supervisor/supervisor/agent/: LangGraph state, routing, prompts, and review nodes.
+grams-app/supervisor/agent/: LangGraph state, routing, prompts, and review nodes.
 
-grams-app/supervisor/supervisor/memory/: Python Memory MCP integration.
+grams-app/supervisor/memory/: Python Memory MCP integration.
 
-grams-app/supervisor/supervisor/opencode/: OpenCode control/context integration.
+grams-app/supervisor/opencode/: OpenCode control/context integration.
 
-grams-app/supervisor/supervisor/platform/sqlite/: Supervisor SQLite setup.
+grams-app/supervisor/platform/sqlite/: Supervisor SQLite setup.
 
 grams-app/memory-mcp/: standalone Go graph-memory MCP.
 

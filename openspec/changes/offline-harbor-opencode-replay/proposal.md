@@ -15,7 +15,7 @@ compararse sin efectos externos no autorizados.
 - El receptor público actual es `POST /events`, con persistencia durable en el
   Inbox SQLite y procesamiento asíncrono por un runtime single-flight.
 - El árbol vigente del Supervisor está bajo
-  `grams-app/supervisor/supervisor/` y separa `inbox/`, `runtime/`, `agent/`,
+  `grams-app/supervisor/` y separa `inbox/`, `runtime/`, `agent/`,
   `memory/` y `opencode/`.
 - El grafo vigente contiene los nodos `REVIEW`, `READ_INBOX`,
   `MEMORY_OPERATION` e `INTERVENE`; `REVIEW` usa un modelo OpenAI-compatible y

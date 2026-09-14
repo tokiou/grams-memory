@@ -2,7 +2,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "supervisor"))
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from supervisor.memory.client import MCPMemoryClient
 

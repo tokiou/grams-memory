@@ -132,11 +132,11 @@ relation to the previous process.
 Retained transport and integrations:
 
 - `grams-opencode/opencode_plugin/`;
-- `grams-app/supervisor/supervisor/api/`;
-- `grams-app/supervisor/supervisor/inbox/`;
-- `grams-app/supervisor/supervisor/memory/`;
-- `grams-app/supervisor/supervisor/opencode/`;
-- `grams-app/supervisor/supervisor/platform/sqlite/`;
+- `grams-app/supervisor/api/`;
+- `grams-app/supervisor/inbox/`;
+- `grams-app/supervisor/memory/`;
+- `grams-app/supervisor/opencode/`;
+- `grams-app/supervisor/platform/sqlite/`;
 - `grams-app/memory-mcp/`.
 
 To be rebuilt as v1 orchestration:
