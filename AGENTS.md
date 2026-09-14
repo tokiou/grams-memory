@@ -105,7 +105,8 @@ Override it with `GRAMS_SUPERVISOR_DB_PATH` or `GRAMS_DB_PATH`.
 - Starting a new process preserves its relation to the previous process.
 - Relations are decision-relevant graph data, not merely storage metadata.
 
-The full v1 direction is documented in `README.md` and `docs/v1/README.md`.
+The full v1 direction is documented in `ARCHITECTURE.md` and
+`docs/v1/README.md`.
 
 ## Local Services
 
@@ -113,7 +114,7 @@ The receiver runs on port `8765`:
 
 ```bash
 .venv/bin/uvicorn supervisor.app:app \
-  --app-dir grams-app/supervisor \
+  --app-dir grams-app \
   --host 0.0.0.0 \
   --port 8765
 ```

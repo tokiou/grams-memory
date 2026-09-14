@@ -536,7 +536,7 @@ python -m pip install -r requirements.txt
 Start the Supervisor API:
 
 .venv/bin/uvicorn supervisor.app:app \
-  --app-dir grams-app/supervisor \
+  --app-dir grams-app \
   --host 0.0.0.0 \
   --port 8765
 

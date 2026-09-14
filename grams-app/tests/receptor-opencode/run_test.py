@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TEST_DIR = Path(__file__).resolve().parent
-SERVER_DIR = ROOT / "grams-app" / "supervisor"
+SERVER_DIR = ROOT / "grams-app"
 CONFIG = TEST_DIR / "test_job.json"
 CACHE_SCRIPT = ROOT / "scripts" / "cache_opencode.sh"
 
