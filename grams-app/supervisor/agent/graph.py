@@ -6,6 +6,7 @@ from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
 
+from supervisor.inbox import EventInbox
 from supervisor.agent.nodes.apply_memory_update import apply_memory_update
 from supervisor.agent.nodes.assess_process_continuity import assess_process_continuity
 from supervisor.agent.nodes.close_current_process import close_current_process
@@ -15,7 +16,7 @@ from supervisor.agent.nodes.expand_graph import expand_graph
 from supervisor.agent.nodes.extract_memory_update import extract_memory_update
 from supervisor.agent.nodes.finalize_cycle import finalize_cycle
 from supervisor.agent.nodes.load_process_context import load_process_context
-from supervisor.agent.nodes.read_inbox import read_inbox
+from supervisor.agent.nodes.read_inbox import make_read_inbox_node
 from supervisor.agent.nodes.record_intervention import record_intervention
 from supervisor.agent.nodes.review import review
 from supervisor.agent.nodes.send_intervention import send_intervention
@@ -26,7 +27,7 @@ from supervisor.agent.state import SupervisorState
 
 def route_after_read_inbox(state: SupervisorState) -> Literal["HAS_EVENTS", "NO_EVENTS"]:
     """Route based on whether READ_INBOX claimed a new event batch."""
-    return "HAS_EVENTS" if state.get("claimed_event_ids") else "NO_EVENTS"
+    return "HAS_EVENTS" if state.get("claimed_events") else "NO_EVENTS"
 
 
 def route_after_process_continuity(
@@ -50,17 +51,23 @@ def route_after_close_process(
     return "START_NEW_PROCESS" if state.get("pending_process_transition") else "FINISH_CYCLE"
 
 
-def build_graph(*, checkpointer=None):
+def build_graph(
+    *,
+    inbox: EventInbox,
+    batch_size: int = 20,
+    run_id: str | None = None,
+    checkpointer=None,
+):
     """Build and compile the initial GRAMS Supervisor graph skeleton.
 
-    Node implementations intentionally remain stubs. The topology enforces
-    that events are read first, an active process exists, process context is
-    loaded before continuity/review, memory updates are applied before the
-    second context load, and review decisions route deterministically.
+    Most node implementations remain stubs. The topology enforces that events
+    are read first, an active process exists, process context is loaded before
+    continuity/review, memory updates are applied before the second context
+    load, and review decisions route deterministically.
     """
     graph = StateGraph(SupervisorState)
 
-    graph.add_node("read_inbox", read_inbox)
+    graph.add_node("read_inbox", make_read_inbox_node(inbox, batch_size=batch_size, run_id=run_id))
     graph.add_node("ensure_active_process", ensure_active_process)
     graph.add_node("load_process_context_before_update", load_process_context)
     graph.add_node("assess_process_continuity", assess_process_continuity)

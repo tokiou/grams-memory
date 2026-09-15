@@ -5,8 +5,9 @@
 This document defines what must be implemented to rebuild the first
 process-based version of the GRAMS Supervisor from scratch.
 
-At this stage, the real logic of each node is intentionally not implemented.
-Only the following must exist:
+At this stage, the real logic of most nodes is intentionally not implemented.
+The current incremental implementation includes the Inbox claim boundary in
+`read_inbox`; the remaining nodes are still stubs. The following must exist:
 
 - `graph.py` with the LangGraph flow;
 - `state.py` with the shared state contract;
@@ -23,8 +24,9 @@ async def some_node(state: SupervisorState) -> dict:
     raise NotImplementedError
 ```
 
-Do not implement real integration with the Inbox, Memory MCP, OpenCode, or an
-LLM provider yet.
+Do not implement real integration with Memory MCP, OpenCode, or an LLM
+provider yet. `read_inbox` is the deliberate exception: it may claim events
+from the existing Inbox, but it must not interpret or acknowledge them.
 
 ## 1. Design Principles
 
@@ -227,7 +229,7 @@ from typing import Literal
 from langgraph.graph import END, START, StateGraph
 
 from supervisor.agent.state import SupervisorState
-from supervisor.agent.nodes.read_inbox import read_inbox
+from supervisor.agent.nodes.read_inbox import make_read_inbox_node
 from supervisor.agent.nodes.ensure_active_process import ensure_active_process
 from supervisor.agent.nodes.load_process_context import load_process_context
 from supervisor.agent.nodes.assess_process_continuity import assess_process_continuity
@@ -251,7 +253,7 @@ def route_after_read_inbox(
     state: SupervisorState,
 ) -> Literal["HAS_EVENTS", "NO_EVENTS"]:
     """Decide whether a new event batch exists."""
-    return "HAS_EVENTS" if state.get("claimed_event_ids") else "NO_EVENTS"
+    return "HAS_EVENTS" if state.get("claimed_events") else "NO_EVENTS"
 
 
 def route_after_process_continuity(
@@ -280,7 +282,7 @@ def route_after_close_process(
 ### Builder Invariants
 
 ```python
-def build_graph(*, checkpointer=None):
+def build_graph(*, inbox: EventInbox, checkpointer=None):
     """Build the main GRAMS Supervisor graph."""
 ```
 
@@ -303,7 +305,7 @@ The expected node registrations and edges are:
 ```python
 graph = StateGraph(SupervisorState)
 
-graph.add_node("read_inbox", read_inbox)
+    graph.add_node("read_inbox", make_read_inbox_node(inbox))
 graph.add_node("ensure_active_process", ensure_active_process)
 graph.add_node("load_process_context_before_update", load_process_context)
 graph.add_node("assess_process_continuity", assess_process_continuity)
@@ -358,8 +360,7 @@ class SupervisorState(TypedDict, total=False):
     project_id: str
     original_task: str
 
-    claimed_event_ids: list[str]
-    recent_events: list[dict[str, Any]]
+    claimed_events: list[ClaimedInboxEvent]
 
     active_process_id: str
     process_context: dict[str, Any]
@@ -384,8 +385,8 @@ Field meanings:
 - `root_session_id`: identifies the supervised OpenCode execution;
 - `project_id`: scopes the memory graph;
 - `original_task`: global task objective;
-- `claimed_event_ids`: events claimed by the current cycle for later ACK;
-- `recent_events`: the current execution delta, kept temporarily;
+- `claimed_events`: current-cycle event envelopes, including IDs and leases for
+  later ACK;
 - `active_process_id`: reference to the supervised process;
 - `process_context`: temporary snapshot derived from MCP;
 - `process_continuity`: SAME_PROCESS or NEW_PROCESS output;
@@ -446,9 +447,10 @@ docstring, and `raise NotImplementedError`.
 
 ### `read_inbox.py`
 
-Claims a batch from Inbox, stores the payloads as `recent_events`, and keeps
-event IDs and leases for later ACK. It does not interpret events, call an LLM,
-consult memory, detect progress, or decide interventions.
+Claims a batch from Inbox and stores serializable event envelopes as
+`claimed_events`, including event IDs and leases for later ACK. It does not
+interpret events, call an LLM, consult memory, detect progress, or decide
+interventions.
 
 ### `ensure_active_process.py`
 

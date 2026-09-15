@@ -6,7 +6,23 @@ service integration will be implemented in later iterations.
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
+
+
+class ClaimedInboxEvent(TypedDict):
+    """Serializable current-cycle event envelope, including lease ownership."""
+
+    id: str
+    lease_id: str
+    root_session_id: str
+    session_id: str | None
+    type: str
+    source_event: str | None
+    payload: Any
+    received_at: str
+    source_run_id: str | None
+    sequence: int | None
+    ingress_id: str | None
 
 
 class ProcessContinuityDecision(TypedDict, total=False):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from supervisor.agent.schemas import (
+    ClaimedInboxEvent,
     MemoryUpdateProposal,
     ProcessContinuityDecision,
     ProgressStall,
@@ -21,8 +22,7 @@ class SupervisorState(TypedDict, total=False):
     original_task: str
 
     # Current Inbox cycle.
-    claimed_event_ids: list[str]
-    recent_events: list[dict[str, Any]]
+    claimed_events: list[ClaimedInboxEvent]
 
     # Current process snapshot.
     active_process_id: str
