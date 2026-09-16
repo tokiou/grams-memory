@@ -21,6 +21,13 @@ type keyRepository interface {
 	GetByName(context.Context, ProjectID, string) (*Key, error)
 	ListByProject(context.Context, ProjectID) ([]Key, error)
 }
+type processRepository interface {
+	Create(context.Context, Process) error
+	GetByID(context.Context, ProcessID) (*Process, error)
+	GetActiveByProject(context.Context, ProjectID) (*Process, error)
+	ListByProject(context.Context, ProjectID) ([]Process, error)
+	Update(context.Context, Process) error
+}
 type categoryRepository interface {
 	Create(context.Context, Category) error
 	GetByID(context.Context, CategoryID) (*Category, error)
@@ -46,13 +53,18 @@ type edgeRepository interface {
 type Service struct {
 	projects   projectRepository
 	keys       keyRepository
+	processes  processRepository
 	categories categoryRepository
 	memories   memoryRepository
 	edges      edgeRepository
 }
 
-func NewService(p projectRepository, k keyRepository, c categoryRepository, m memoryRepository, e edgeRepository) *Service {
-	return &Service{p, k, c, m, e}
+func NewService(p projectRepository, k keyRepository, c categoryRepository, m memoryRepository, e edgeRepository, processes ...processRepository) *Service {
+	var processRepo processRepository
+	if len(processes) > 0 {
+		processRepo = processes[0]
+	}
+	return &Service{projects: p, keys: k, processes: processRepo, categories: c, memories: m, edges: e}
 }
 func newID() string { return uuid.NewString() }
 func validateName(s string) error {
@@ -99,6 +111,99 @@ func (s *Service) CreateKey(ctx context.Context, k Key) (Key, error) {
 func (s *Service) GetKey(ctx context.Context, id KeyID) (*Key, error) { return s.keys.GetByID(ctx, id) }
 func (s *Service) ListKeys(ctx context.Context, p ProjectID) ([]Key, error) {
 	return s.keys.ListByProject(ctx, p)
+}
+
+func validProcessStatus(v ProcessStatus) bool {
+	switch v {
+	case ProcessStatusActive, ProcessStatusSucceeded, ProcessStatusFailed, ProcessStatusAbandoned, ProcessStatusSuperseded:
+		return true
+	}
+	return false
+}
+
+func (s *Service) CreateProcess(ctx context.Context, p Process) (Process, error) {
+	if s.processes == nil {
+		return p, fmt.Errorf("%w: process repository unavailable", ErrInvalidArgument)
+	}
+	if e := validateName(p.Name); e != nil {
+		return p, e
+	}
+	if p.Status == "" {
+		p.Status = ProcessStatusActive
+	}
+	if !validProcessStatus(p.Status) {
+		return p, fmt.Errorf("%w: invalid process status", ErrInvalidArgument)
+	}
+	if p.Status != ProcessStatusActive {
+		return p, fmt.Errorf("%w: new processes must be ACTIVE", ErrInvalidArgument)
+	}
+	project, err := s.projects.GetByID(ctx, p.ProjectID)
+	if err != nil {
+		return p, err
+	}
+	key, err := s.keys.GetByID(ctx, p.KeyID)
+	if err != nil {
+		return p, err
+	}
+	if key.ProjectID != project.ID {
+		return p, fmt.Errorf("%w: key and process must belong to the same project", ErrInvalidArgument)
+	}
+	if p.ID == "" {
+		p.ID = ProcessID(newID())
+	}
+	p.StartedAt, p.CreatedAt, p.UpdatedAt = time.Now().UTC(), time.Now().UTC(), time.Now().UTC()
+	if p.PredecessorID != nil {
+		if *p.PredecessorID == p.ID {
+			return p, fmt.Errorf("%w: process cannot be its own predecessor", ErrInvalidArgument)
+		}
+		previous, e := s.processes.GetByID(ctx, *p.PredecessorID)
+		if e != nil {
+			return p, e
+		}
+		if previous.ProjectID != p.ProjectID {
+			return p, fmt.Errorf("%w: predecessor and process must belong to the same project", ErrInvalidArgument)
+		}
+	}
+	if err = s.processes.Create(ctx, p); err != nil {
+		return p, err
+	}
+	return p, nil
+}
+func (s *Service) GetProcess(ctx context.Context, id ProcessID) (*Process, error) {
+	if s.processes == nil {
+		return nil, fmt.Errorf("%w: process repository unavailable", ErrInvalidArgument)
+	}
+	return s.processes.GetByID(ctx, id)
+}
+func (s *Service) GetActiveProcess(ctx context.Context, project ProjectID) (*Process, error) {
+	if s.processes == nil {
+		return nil, fmt.Errorf("%w: process repository unavailable", ErrInvalidArgument)
+	}
+	return s.processes.GetActiveByProject(ctx, project)
+}
+func (s *Service) ListProcesses(ctx context.Context, project ProjectID) ([]Process, error) {
+	if s.processes == nil {
+		return nil, fmt.Errorf("%w: process repository unavailable", ErrInvalidArgument)
+	}
+	return s.processes.ListByProject(ctx, project)
+}
+func (s *Service) CloseProcess(ctx context.Context, id ProcessID, status ProcessStatus) (Process, error) {
+	p, err := s.GetProcess(ctx, id)
+	if err != nil {
+		return Process{}, err
+	}
+	if p.Status != ProcessStatusActive {
+		return *p, fmt.Errorf("%w: process is not active", ErrInvalidArgument)
+	}
+	if status == ProcessStatusActive || !validProcessStatus(status) {
+		return *p, fmt.Errorf("%w: closing status must be terminal", ErrInvalidArgument)
+	}
+	now := time.Now().UTC()
+	p.Status, p.ClosedAt, p.UpdatedAt = status, &now, now
+	if err = s.processes.Update(ctx, *p); err != nil {
+		return *p, err
+	}
+	return *p, nil
 }
 func (s *Service) CreateCategory(ctx context.Context, c Category) (Category, error) {
 	if e := validateName(c.Name); e != nil {

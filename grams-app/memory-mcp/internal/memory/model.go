@@ -4,6 +4,7 @@ import "time"
 
 type ProjectID string
 type KeyID string
+type ProcessID string
 type CategoryID string
 type MemoryID string
 type EdgeID string
@@ -26,6 +27,30 @@ type Key struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type ProcessStatus string
+
+const (
+	ProcessStatusActive     ProcessStatus = "ACTIVE"
+	ProcessStatusSucceeded  ProcessStatus = "SUCCEEDED"
+	ProcessStatusFailed     ProcessStatus = "FAILED"
+	ProcessStatusAbandoned  ProcessStatus = "ABANDONED"
+	ProcessStatusSuperseded ProcessStatus = "SUPERSEDED"
+)
+
+type Process struct {
+	ID            ProcessID
+	ProjectID     ProjectID
+	KeyID         KeyID
+	Name          string
+	Description   string
+	Status        ProcessStatus
+	PredecessorID *ProcessID
+	StartedAt     time.Time
+	ClosedAt      *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type Category struct {

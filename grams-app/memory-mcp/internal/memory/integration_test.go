@@ -104,3 +104,57 @@ func TestCrossProjectEdgesRejected(t *testing.T) {
 		t.Fatalf("expected cross-project error, got %v", err)
 	}
 }
+
+func TestProcessLifecycleAndSingleActiveInvariant(t *testing.T) {
+	ctx := context.Background()
+	db, err := sqlite.New(ctx, filepath.Join(t.TempDir(), "grams.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqlite.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	pr, kr, cr := NewProjectRepository(db), NewKeyRepository(db), NewCategoryRepository(db)
+	mr, er, pcr := NewMemoryRepository(db), NewEdgeRepository(db), NewProcessRepository(db)
+	svc := NewService(pr, kr, cr, mr, er, pcr)
+	project, err := svc.CreateProject(ctx, Project{Name: "process-project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := svc.CreateKey(ctx, Key{ProjectID: project.ID, Name: "strategy-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := svc.CreateProcess(ctx, Process{ProjectID: project.ID, KeyID: key.ID, Name: "first strategy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process.Status != ProcessStatusActive || process.ClosedAt != nil {
+		t.Fatalf("unexpected active process: %#v", process)
+	}
+	active, err := svc.GetActiveProcess(ctx, project.ID)
+	if err != nil || active.ID != process.ID {
+		t.Fatalf("active process lookup failed: %v %#v", err, active)
+	}
+	if _, err = svc.CreateProcess(ctx, Process{ProjectID: project.ID, KeyID: key.ID, Name: "second strategy"}); err == nil {
+		t.Fatal("expected one-active-process constraint")
+	}
+	closed, err := svc.CloseProcess(ctx, process.ID, ProcessStatusSucceeded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.Status != ProcessStatusSucceeded || closed.ClosedAt == nil {
+		t.Fatalf("unexpected closed process: %#v", closed)
+	}
+	if _, err = svc.GetActiveProcess(ctx, project.ID); err != ErrProcessNotFound {
+		t.Fatalf("expected no active process, got %v", err)
+	}
+	key2, err := svc.CreateKey(ctx, Key{ProjectID: project.ID, Name: "strategy-key-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.CreateProcess(ctx, Process{ProjectID: project.ID, KeyID: key2.ID, Name: "second strategy", PredecessorID: &process.ID}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -5,6 +5,8 @@ import "errors"
 var (
 	ErrProjectNotFound       = errors.New("project not found")
 	ErrKeyNotFound           = errors.New("key not found")
+	ErrProcessNotFound       = errors.New("process not found")
+	ErrProcessConflict       = errors.New("process lifecycle conflict")
 	ErrCategoryNotFound      = errors.New("category not found")
 	ErrMemoryNotFound        = errors.New("memory not found")
 	ErrEdgeNotFound          = errors.New("edge not found")

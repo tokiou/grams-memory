@@ -27,12 +27,14 @@ func archivedValue(t *time.Time) any {
 
 type ProjectRepository struct{ db *sql.DB }
 type KeyRepository struct{ db *sql.DB }
+type ProcessRepository struct{ db *sql.DB }
 type CategoryRepository struct{ db *sql.DB }
 type MemoryRepository struct{ db *sql.DB }
 type EdgeRepository struct{ db *sql.DB }
 
 func NewProjectRepository(db *sql.DB) *ProjectRepository   { return &ProjectRepository{db} }
 func NewKeyRepository(db *sql.DB) *KeyRepository           { return &KeyRepository{db} }
+func NewProcessRepository(db *sql.DB) *ProcessRepository   { return &ProcessRepository{db} }
 func NewCategoryRepository(db *sql.DB) *CategoryRepository { return &CategoryRepository{db} }
 func NewMemoryRepository(db *sql.DB) *MemoryRepository     { return &MemoryRepository{db} }
 func NewEdgeRepository(db *sql.DB) *EdgeRepository         { return &EdgeRepository{db} }
@@ -156,6 +158,90 @@ func (r *KeyRepository) Update(ctx context.Context, k Key) error {
 func (r *KeyRepository) Delete(ctx context.Context, id KeyID) error {
 	_, e := r.db.ExecContext(ctx, "DELETE FROM keys WHERE id=?", id)
 	return e
+}
+
+func scanProcess(row interface{ Scan(...any) error }, p *Process) error {
+	var predecessor, closed sql.NullString
+	var started, created, updated string
+	if err := row.Scan(&p.ID, &p.ProjectID, &p.KeyID, &p.Name, &p.Description, &p.Status, &predecessor, &started, &closed, &created, &updated); err != nil {
+		return err
+	}
+	var err error
+	p.StartedAt, err = parseTS(started)
+	if err != nil {
+		return err
+	}
+	p.CreatedAt, err = parseTS(created)
+	if err != nil {
+		return err
+	}
+	p.UpdatedAt, err = parseTS(updated)
+	if err != nil {
+		return err
+	}
+	if predecessor.Valid {
+		id := ProcessID(predecessor.String)
+		p.PredecessorID = &id
+	}
+	if closed.Valid {
+		t, err := parseTS(closed.String)
+		if err != nil {
+			return err
+		}
+		p.ClosedAt = &t
+	}
+	return nil
+}
+
+func (r *ProcessRepository) Create(ctx context.Context, p Process) error {
+	_, err := r.db.ExecContext(ctx, "INSERT INTO processes(id,project_id,key_id,name,description,status,predecessor_id,started_at,closed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", p.ID, p.ProjectID, p.KeyID, p.Name, p.Description, p.Status, p.PredecessorID, ts(p.StartedAt), archivedValue(p.ClosedAt), ts(p.CreatedAt), ts(p.UpdatedAt))
+	return err
+}
+func (r *ProcessRepository) GetByID(ctx context.Context, id ProcessID) (*Process, error) {
+	p := &Process{}
+	err := scanProcess(r.db.QueryRowContext(ctx, "SELECT id,project_id,key_id,name,description,status,predecessor_id,started_at,closed_at,created_at,updated_at FROM processes WHERE id=?", id), p)
+	if err != nil {
+		return nil, notFound(err, ErrProcessNotFound)
+	}
+	return p, nil
+}
+func (r *ProcessRepository) GetActiveByProject(ctx context.Context, id ProjectID) (*Process, error) {
+	p := &Process{}
+	err := scanProcess(r.db.QueryRowContext(ctx, "SELECT id,project_id,key_id,name,description,status,predecessor_id,started_at,closed_at,created_at,updated_at FROM processes WHERE project_id=? AND status='ACTIVE'", id), p)
+	if err != nil {
+		return nil, notFound(err, ErrProcessNotFound)
+	}
+	return p, nil
+}
+func (r *ProcessRepository) ListByProject(ctx context.Context, id ProjectID) ([]Process, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT id,project_id,key_id,name,description,status,predecessor_id,started_at,closed_at,created_at,updated_at FROM processes WHERE project_id=? ORDER BY started_at", id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Process
+	for rows.Next() {
+		p := Process{}
+		if err := scanProcess(rows, &p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+func (r *ProcessRepository) Update(ctx context.Context, p Process) error {
+	result, err := r.db.ExecContext(ctx, "UPDATE processes SET status=?,closed_at=?,updated_at=? WHERE id=? AND status='ACTIVE'", p.Status, archivedValue(p.ClosedAt), ts(p.UpdatedAt), p.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrProcessConflict
+	}
+	return err
 }
 
 func (r *CategoryRepository) Create(ctx context.Context, c Category) error {

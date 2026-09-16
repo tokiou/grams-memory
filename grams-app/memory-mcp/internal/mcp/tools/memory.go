@@ -21,6 +21,17 @@ type categoryInput struct {
 	Name        string       `json:"name"`
 	Description string       `json:"description,omitempty"`
 }
+type processInput struct {
+	ProjectID     memory.ProjectID  `json:"project_id"`
+	KeyID         memory.KeyID      `json:"key_id"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description,omitempty"`
+	PredecessorID *memory.ProcessID `json:"predecessor_id,omitempty"`
+}
+type processCloseInput struct {
+	ID     memory.ProcessID     `json:"id"`
+	Status memory.ProcessStatus `json:"status"`
+}
 type idInput struct {
 	ID string `json:"id"`
 }
@@ -108,6 +119,26 @@ func RegisterMemoryTools(s *mcp.Server, svc *memory.Service, graph *memory.Graph
 	mcp.AddTool(s, &mcp.Tool{Name: "category_list", Description: "List key categories"}, func(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, []memory.Category, error) {
 		c, e := svc.ListCategories(ctx, memory.KeyID(in.ID))
 		return nil, c, e
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "process_create", Description: "Create an active process for a project and memory key"}, func(ctx context.Context, _ *mcp.CallToolRequest, in processInput) (*mcp.CallToolResult, memory.Process, error) {
+		p, e := svc.CreateProcess(ctx, memory.Process{ProjectID: in.ProjectID, KeyID: in.KeyID, Name: in.Name, Description: in.Description, PredecessorID: in.PredecessorID})
+		return nil, p, e
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "process_get", Description: "Get a process"}, func(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, *memory.Process, error) {
+		p, e := svc.GetProcess(ctx, memory.ProcessID(in.ID))
+		return nil, p, e
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "process_get_active", Description: "Get the active process for a project"}, func(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, *memory.Process, error) {
+		p, e := svc.GetActiveProcess(ctx, memory.ProjectID(in.ID))
+		return nil, p, e
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "process_list", Description: "List processes for a project"}, func(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, []memory.Process, error) {
+		p, e := svc.ListProcesses(ctx, memory.ProjectID(in.ID))
+		return nil, p, e
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "process_close", Description: "Close an active process"}, func(ctx context.Context, _ *mcp.CallToolRequest, in processCloseInput) (*mcp.CallToolResult, memory.Process, error) {
+		p, e := svc.CloseProcess(ctx, in.ID, in.Status)
+		return nil, p, e
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_create", Description: "Create a memory"}, func(ctx context.Context, _ *mcp.CallToolRequest, in memoryInput) (*mcp.CallToolResult, memory.Memory, error) {
 		m, e := svc.CreateMemory(ctx, memory.Memory{CategoryID: in.CategoryID, Content: in.Content, Title: in.Title, Description: in.Description, Type: in.Type, Status: in.Status, GraphTier: in.GraphTier, Avoid: in.Avoid, Confidence: confidence(in.Confidence), Source: in.Source})

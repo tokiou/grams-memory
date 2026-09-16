@@ -28,10 +28,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	pr := memory.NewProjectRepository(db)
 	kr := memory.NewKeyRepository(db)
+	prc := memory.NewProcessRepository(db)
 	cr := memory.NewCategoryRepository(db)
 	mr := memory.NewMemoryRepository(db)
 	er := memory.NewEdgeRepository(db)
-	svc := memory.NewService(pr, kr, cr, mr, er)
+	svc := memory.NewService(pr, kr, cr, mr, er, prc)
 	graph := memory.NewGraphService(mr, er)
 	return &App{DB: db, Server: mcpserver.New(svc, graph)}, nil
 }

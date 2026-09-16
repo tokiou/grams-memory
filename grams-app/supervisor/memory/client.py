@@ -34,6 +34,10 @@ class MemoryClient(Protocol):
     async def ensure_session_hierarchy(self, root_session_id: str) -> str: ...
 
     async def get_manifest(self) -> dict[str, Any]: ...
+    async def get_active_process(self, project_id: str) -> dict[str, Any] | None: ...
+    async def create_process(self, process: dict[str, Any]) -> dict[str, Any]: ...
+    async def close_process(self, process_id: str, status: str) -> dict[str, Any]: ...
+    async def list_processes(self, project_id: str) -> list[dict[str, Any]]: ...
 
 
 class MCPMemoryClient:
@@ -199,6 +203,29 @@ class MCPMemoryClient:
                 project_entry["keys"].append(key_entry)
             manifest["projects"].append(project_entry)
         return manifest
+
+    async def get_active_process(self, project_id: str) -> dict[str, Any] | None:
+        return await self._call_tool("process_get_active", {"id": project_id})
+
+    async def create_process(self, process: dict[str, Any]) -> dict[str, Any]:
+        result = await self._call_tool("process_create", process)
+        if not isinstance(result, dict):
+            raise RuntimeError("Memory MCP process_create returned an invalid process")
+        return result
+
+    async def close_process(self, process_id: str, status: str) -> dict[str, Any]:
+        result = await self._call_tool("process_close", {"id": process_id, "status": status})
+        if not isinstance(result, dict):
+            raise RuntimeError("Memory MCP process_close returned an invalid process")
+        return result
+
+    async def list_processes(self, project_id: str) -> list[dict[str, Any]]:
+        result = await self._call_tool("process_list", {"id": project_id})
+        if result is None:
+            return []
+        if not isinstance(result, list):
+            raise RuntimeError("Memory MCP process_list returned an invalid list")
+        return result
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         await self._ensure_initialized()
