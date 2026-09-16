@@ -7,11 +7,12 @@ from typing import Literal
 from langgraph.graph import END, START, StateGraph
 
 from supervisor.inbox import EventInbox
+from supervisor.memory.client import MemoryClient
 from supervisor.agent.nodes.apply_memory_update import apply_memory_update
 from supervisor.agent.nodes.assess_process_continuity import assess_process_continuity
 from supervisor.agent.nodes.close_current_process import close_current_process
 from supervisor.agent.nodes.detect_progress_stall import detect_progress_stall
-from supervisor.agent.nodes.ensure_active_process import ensure_active_process
+from supervisor.agent.nodes.ensure_active_process import make_ensure_active_process
 from supervisor.agent.nodes.expand_graph import expand_graph
 from supervisor.agent.nodes.extract_memory_update import extract_memory_update
 from supervisor.agent.nodes.finalize_cycle import finalize_cycle
@@ -54,6 +55,7 @@ def route_after_close_process(
 def build_graph(
     *,
     inbox: EventInbox,
+    memory: MemoryClient,
     batch_size: int = 20,
     run_id: str | None = None,
     checkpointer=None,
@@ -68,7 +70,7 @@ def build_graph(
     graph = StateGraph(SupervisorState)
 
     graph.add_node("read_inbox", make_read_inbox_node(inbox, batch_size=batch_size, run_id=run_id))
-    graph.add_node("ensure_active_process", ensure_active_process)
+    graph.add_node("ensure_active_process", make_ensure_active_process(memory))
     graph.add_node("load_process_context_before_update", load_process_context)
     graph.add_node("assess_process_continuity", assess_process_continuity)
     graph.add_node("extract_memory_update", extract_memory_update)

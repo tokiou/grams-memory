@@ -32,6 +32,11 @@ class MemoryClient(Protocol):
     async def restore(self, memory_id: str) -> dict[str, Any]: ...
 
     async def ensure_session_hierarchy(self, root_session_id: str) -> str: ...
+    async def ensure_session_project(self, root_session_id: str) -> str: ...
+    async def create_key(self, project_id: str, name: str, description: str = "") -> dict[str, Any]: ...
+    async def list_keys(self, project_id: str) -> list[dict[str, Any]]: ...
+    async def create_category(self, key_id: str, name: str, description: str = "") -> dict[str, Any]: ...
+    async def list_categories(self, key_id: str) -> list[dict[str, Any]]: ...
 
     async def get_manifest(self) -> dict[str, Any]: ...
     async def get_active_process(self, project_id: str) -> dict[str, Any] | None: ...
@@ -140,10 +145,19 @@ class MCPMemoryClient:
         projects = list(await self._call_tool("project_list", {}) or [])
         project = next((item for item in projects if _field(item, "name") == root_session_id), None)
         if project is None:
-            project = await self._call_tool("project_create", {
-                "name": root_session_id,
-                "description": f"OpenCode session memory for {root_session_id}",
-            })
+            try:
+                project = await self._call_tool("project_create", {
+                    "name": root_session_id,
+                    "description": f"OpenCode session memory for {root_session_id}",
+                })
+            except RuntimeError:
+                project = next(
+                    (item for item in list(await self._call_tool("project_list", {}) or [])
+                     if _field(item, "name") == root_session_id),
+                    None,
+                )
+                if project is None:
+                    raise
         project_id = _field(project, "id")
         keys = list(await self._call_tool("key_list", {"id": project_id}) or [])
         taxonomy = {
@@ -155,26 +169,81 @@ class MCPMemoryClient:
         for key_name, category_names in taxonomy.items():
             key = next((item for item in keys if _field(item, "name") == key_name), None)
             if key is None:
-                key = await self._call_tool("key_create", {
-                    "project_id": project_id,
-                    "name": key_name,
-                    "description": f"{key_name.title()} knowledge for {root_session_id}",
-                })
+                try:
+                    key = await self._call_tool("key_create", {
+                        "project_id": project_id,
+                        "name": key_name,
+                        "description": f"{key_name.title()} knowledge for {root_session_id}",
+                    })
+                except RuntimeError:
+                    key = next(
+                        (item for item in list(await self._call_tool("key_list", {"id": project_id}) or [])
+                         if _field(item, "name") == key_name),
+                        None,
+                    )
+                    if key is None:
+                        raise
             key_id = _field(key, "id")
             categories = list(await self._call_tool("category_list", {"id": key_id}) or [])
             for category_name in category_names:
                 category = next((item for item in categories if _field(item, "name") == category_name), None)
                 if category is None:
-                    category = await self._call_tool("category_create", {
-                        "key_id": key_id,
-                        "name": category_name,
-                        "description": f"{category_name.title()} for {root_session_id}",
-                    })
+                    try:
+                        category = await self._call_tool("category_create", {
+                            "key_id": key_id,
+                            "name": category_name,
+                            "description": f"{category_name.title()} for {root_session_id}",
+                        })
+                    except RuntimeError:
+                        category = next(
+                            (item for item in list(await self._call_tool("category_list", {"id": key_id}) or [])
+                             if _field(item, "name") == category_name),
+                            None,
+                        )
+                        if category is None:
+                            raise
                 if key_name == "execution" and category_name == "progress":
                     default_category_id = str(_field(category, "id"))
         if default_category_id is None:
             raise RuntimeError("session memory hierarchy did not create an execution/progress category")
         return default_category_id
+
+    async def ensure_session_project(self, root_session_id: str) -> str:
+        await self.ensure_session_hierarchy(root_session_id)
+        for project in list(await self._call_tool("project_list", {}) or []):
+            if _field(project, "name") == root_session_id:
+                project_id = _field(project, "id")
+                if project_id:
+                    return str(project_id)
+        raise RuntimeError(f"Memory MCP project not found for session {root_session_id}")
+
+    async def create_key(self, project_id: str, name: str, description: str = "") -> dict[str, Any]:
+        result = await self._call_tool("key_create", {
+            "project_id": project_id,
+            "name": name,
+            "description": description,
+        })
+        if not isinstance(result, dict):
+            raise RuntimeError("Memory MCP key_create returned an invalid key")
+        return result
+
+    async def list_keys(self, project_id: str) -> list[dict[str, Any]]:
+        result = await self._call_tool("key_list", {"id": project_id})
+        return list(result or [])
+
+    async def create_category(self, key_id: str, name: str, description: str = "") -> dict[str, Any]:
+        result = await self._call_tool("category_create", {
+            "key_id": key_id,
+            "name": name,
+            "description": description,
+        })
+        if not isinstance(result, dict):
+            raise RuntimeError("Memory MCP category_create returned an invalid category")
+        return result
+
+    async def list_categories(self, key_id: str) -> list[dict[str, Any]]:
+        result = await self._call_tool("category_list", {"id": key_id})
+        return list(result or [])
 
     async def get_manifest(self) -> dict[str, Any]:
         manifest: dict[str, Any] = {"projects": []}

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tokiou/grams-memory/grams-app/memory-mcp/internal/memory"
 	"time"
@@ -130,6 +131,9 @@ func RegisterMemoryTools(s *mcp.Server, svc *memory.Service, graph *memory.Graph
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "process_get_active", Description: "Get the active process for a project"}, func(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, *memory.Process, error) {
 		p, e := svc.GetActiveProcess(ctx, memory.ProjectID(in.ID))
+		if errors.Is(e, memory.ErrProcessNotFound) {
+			return nil, nil, nil
+		}
 		return nil, p, e
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "process_list", Description: "List processes for a project"}, func(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, []memory.Process, error) {
