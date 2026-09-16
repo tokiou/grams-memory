@@ -158,3 +158,46 @@ func TestProcessLifecycleAndSingleActiveInvariant(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCreateProcessWithMemoryCreatesProcessKeyAndCategoriesAtomically(t *testing.T) {
+	ctx := context.Background()
+	db, err := sqlite.New(ctx, filepath.Join(t.TempDir(), "grams.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := sqlite.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	pr, kr, cr := NewProjectRepository(db), NewKeyRepository(db), NewCategoryRepository(db)
+	mr, er, pcr := NewMemoryRepository(db), NewEdgeRepository(db), NewProcessRepository(db)
+	svc := NewService(pr, kr, cr, mr, er, pcr)
+	project, err := svc.CreateProject(ctx, Project{Name: "atomic-process-project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := svc.CreateProcessWithMemory(ctx, Process{ProjectID: project.ID, Name: "process_001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := svc.ListKeys(ctx, project.ID)
+	if err != nil || len(keys) != 1 || keys[0].ID != process.KeyID {
+		t.Fatalf("unexpected process keys: %v %#v", err, keys)
+	}
+	categories, err := svc.ListCategories(ctx, process.KeyID)
+	if err != nil || len(categories) != 3 {
+		t.Fatalf("unexpected process categories: %v %#v", err, categories)
+	}
+	for _, expected := range []string{"STRATEGY", "EVIDENCE", "SUMMARY"} {
+		found := false
+		for _, category := range categories {
+			if category.Name == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing process category %q: %#v", expected, categories)
+		}
+	}
+}

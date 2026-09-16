@@ -33,10 +33,6 @@ class MemoryClient(Protocol):
 
     async def ensure_session_hierarchy(self, root_session_id: str) -> str: ...
     async def ensure_session_project(self, root_session_id: str) -> str: ...
-    async def create_key(self, project_id: str, name: str, description: str = "") -> dict[str, Any]: ...
-    async def list_keys(self, project_id: str) -> list[dict[str, Any]]: ...
-    async def create_category(self, key_id: str, name: str, description: str = "") -> dict[str, Any]: ...
-    async def list_categories(self, key_id: str) -> list[dict[str, Any]]: ...
 
     async def get_manifest(self) -> dict[str, Any]: ...
     async def get_active_process(self, project_id: str) -> dict[str, Any] | None: ...
@@ -216,34 +212,6 @@ class MCPMemoryClient:
                 if project_id:
                     return str(project_id)
         raise RuntimeError(f"Memory MCP project not found for session {root_session_id}")
-
-    async def create_key(self, project_id: str, name: str, description: str = "") -> dict[str, Any]:
-        result = await self._call_tool("key_create", {
-            "project_id": project_id,
-            "name": name,
-            "description": description,
-        })
-        if not isinstance(result, dict):
-            raise RuntimeError("Memory MCP key_create returned an invalid key")
-        return result
-
-    async def list_keys(self, project_id: str) -> list[dict[str, Any]]:
-        result = await self._call_tool("key_list", {"id": project_id})
-        return list(result or [])
-
-    async def create_category(self, key_id: str, name: str, description: str = "") -> dict[str, Any]:
-        result = await self._call_tool("category_create", {
-            "key_id": key_id,
-            "name": name,
-            "description": description,
-        })
-        if not isinstance(result, dict):
-            raise RuntimeError("Memory MCP category_create returned an invalid category")
-        return result
-
-    async def list_categories(self, key_id: str) -> list[dict[str, Any]]:
-        result = await self._call_tool("category_list", {"id": key_id})
-        return list(result or [])
 
     async def get_manifest(self) -> dict[str, Any]:
         manifest: dict[str, Any] = {"projects": []}

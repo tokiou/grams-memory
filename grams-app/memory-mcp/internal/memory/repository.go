@@ -197,6 +197,26 @@ func (r *ProcessRepository) Create(ctx context.Context, p Process) error {
 	_, err := r.db.ExecContext(ctx, "INSERT INTO processes(id,project_id,key_id,name,description,status,predecessor_id,started_at,closed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", p.ID, p.ProjectID, p.KeyID, p.Name, p.Description, p.Status, p.PredecessorID, ts(p.StartedAt), archivedValue(p.ClosedAt), ts(p.CreatedAt), ts(p.UpdatedAt))
 	return err
 }
+
+func (r *ProcessRepository) CreateWithMemory(ctx context.Context, p Process, k Key, categories []Category) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "INSERT INTO keys(id,project_id,name,description,created_at,updated_at) VALUES(?,?,?,?,?,?)", k.ID, k.ProjectID, k.Name, k.Description, ts(k.CreatedAt), ts(k.UpdatedAt)); err != nil {
+		return err
+	}
+	for _, c := range categories {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO categories(id,key_id,name,description,created_at,updated_at) VALUES(?,?,?,?,?,?)", c.ID, c.KeyID, c.Name, c.Description, ts(c.CreatedAt), ts(c.UpdatedAt)); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO processes(id,project_id,key_id,name,description,status,predecessor_id,started_at,closed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", p.ID, p.ProjectID, p.KeyID, p.Name, p.Description, p.Status, p.PredecessorID, ts(p.StartedAt), archivedValue(p.ClosedAt), ts(p.CreatedAt), ts(p.UpdatedAt)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 func (r *ProcessRepository) GetByID(ctx context.Context, id ProcessID) (*Process, error) {
 	p := &Process{}
 	err := scanProcess(r.db.QueryRowContext(ctx, "SELECT id,project_id,key_id,name,description,status,predecessor_id,started_at,closed_at,created_at,updated_at FROM processes WHERE id=?", id), p)

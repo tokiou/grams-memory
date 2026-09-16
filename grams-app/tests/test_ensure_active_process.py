@@ -25,14 +25,6 @@ class FakeMemory:
         self.calls.append(("list_processes", project_id))
         return self.processes
 
-    async def create_key(self, project_id, name, description=""):
-        self.calls.append(("create_key", project_id, name, description))
-        return {"id": "key-1"}
-
-    async def create_category(self, key_id, name, description=""):
-        self.calls.append(("create_category", key_id, name, description))
-        return {"id": f"category-{name}"}
-
     async def create_process(self, process):
         self.calls.append(("create_process", process))
         return {"id": "process-1"}
@@ -70,11 +62,8 @@ def test_creates_process_key_and_categories_when_no_active_process_exists():
             "list_processes",
             "project-1",
         )
-        assert memory.calls[3][2] == "process_004"
-        assert [call[2] for call in memory.calls[4:7]] == ["STRATEGY", "EVIDENCE", "SUMMARY"]
-        assert memory.calls[7][1] == {
+        assert memory.calls[3][1] == {
             "project_id": "project-1",
-            "key_id": "key-1",
             "name": "process_004",
         }
 

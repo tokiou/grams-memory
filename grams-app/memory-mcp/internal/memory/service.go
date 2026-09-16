@@ -23,6 +23,7 @@ type keyRepository interface {
 }
 type processRepository interface {
 	Create(context.Context, Process) error
+	CreateWithMemory(context.Context, Process, Key, []Category) error
 	GetByID(context.Context, ProcessID) (*Process, error)
 	GetActiveByProject(context.Context, ProjectID) (*Process, error)
 	ListByProject(context.Context, ProjectID) ([]Process, error)
@@ -165,6 +166,54 @@ func (s *Service) CreateProcess(ctx context.Context, p Process) (Process, error)
 		}
 	}
 	if err = s.processes.Create(ctx, p); err != nil {
+		return p, err
+	}
+	return p, nil
+}
+
+func (s *Service) CreateProcessWithMemory(ctx context.Context, p Process) (Process, error) {
+	if s.processes == nil {
+		return p, fmt.Errorf("%w: process repository unavailable", ErrInvalidArgument)
+	}
+	if e := validateName(p.Name); e != nil {
+		return p, e
+	}
+	if p.Status == "" {
+		p.Status = ProcessStatusActive
+	}
+	if p.Status != ProcessStatusActive {
+		return p, fmt.Errorf("%w: new processes must be ACTIVE", ErrInvalidArgument)
+	}
+	project, err := s.projects.GetByID(ctx, p.ProjectID)
+	if err != nil {
+		return p, err
+	}
+	if p.PredecessorID != nil {
+		if *p.PredecessorID == p.ID {
+			return p, fmt.Errorf("%w: process cannot be its own predecessor", ErrInvalidArgument)
+		}
+		previous, e := s.processes.GetByID(ctx, *p.PredecessorID)
+		if e != nil {
+			return p, e
+		}
+		if previous.ProjectID != p.ProjectID {
+			return p, fmt.Errorf("%w: predecessor and process must belong to the same project", ErrInvalidArgument)
+		}
+	}
+	if p.ID == "" {
+		p.ID = ProcessID(newID())
+	}
+	now := time.Now().UTC()
+	p.StartedAt, p.CreatedAt, p.UpdatedAt = now, now, now
+	keyID := KeyID(newID())
+	key := Key{ID: keyID, ProjectID: project.ID, Name: p.Name, Description: fmt.Sprintf("Execution process memory for %s", project.Name), CreatedAt: now, UpdatedAt: now}
+	categories := make([]Category, 0, 3)
+	for _, name := range []string{"STRATEGY", "EVIDENCE", "SUMMARY"} {
+		categoryNow := now
+		categories = append(categories, Category{ID: CategoryID(newID()), KeyID: keyID, Name: name, Description: fmt.Sprintf("%s for %s", name, p.Name), CreatedAt: categoryNow, UpdatedAt: categoryNow})
+	}
+	p.KeyID = keyID
+	if err = s.processes.CreateWithMemory(ctx, p, key, categories); err != nil {
 		return p, err
 	}
 	return p, nil

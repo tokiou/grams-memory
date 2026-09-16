@@ -10,7 +10,6 @@ from supervisor.memory.client import MemoryClient, _field
 
 
 _PROCESS_NAME = re.compile(r"^process_(\d+)$")
-_PROCESS_CATEGORIES = ("STRATEGY", "EVIDENCE", "SUMMARY")
 
 
 def _process_number(processes: list[dict[str, Any]]) -> int:
@@ -29,9 +28,9 @@ def make_ensure_active_process(memory: MemoryClient):
         """Ensure and return the ACTIVE process identity for this session.
 
         The Project is the durable scope for ``root_session_id``. The node only
-        resolves or creates process identity and its memory key/categories; it
-        does not interpret events, assess strategy quality, detect pivots, or
-        call an LLM.
+        resolves process identity or delegates atomic process creation to
+        Memory MCP; it does not interpret events, assess strategy quality,
+        detect pivots, or call an LLM.
         """
         root_session_id = state.get("root_session_id")
         if not root_session_id:
@@ -51,43 +50,8 @@ def make_ensure_active_process(memory: MemoryClient):
         processes = await memory.list_processes(project_id)
         process_name = f"process_{_process_number(processes):03d}"
         try:
-            key = await memory.create_key(
-                project_id,
-                process_name,
-                f"Execution process memory for {root_session_id}",
-            )
-        except Exception:
-            key = next(
-                (item for item in await memory.list_keys(project_id)
-                 if _field(item, "name") == process_name),
-                None,
-            )
-            if key is None:
-                raise
-        key_id = _field(key, "id")
-        if not key_id:
-            raise RuntimeError("Memory MCP key_create returned a key without an id")
-
-        for category_name in _PROCESS_CATEGORIES:
-            try:
-                await memory.create_category(
-                    str(key_id),
-                    category_name,
-                    f"{category_name.title()} for {process_name}",
-                )
-            except Exception:
-                existing = next(
-                    (item for item in await memory.list_categories(str(key_id))
-                     if _field(item, "name") == category_name),
-                    None,
-                )
-                if existing is None:
-                    raise
-
-        try:
             process = await memory.create_process({
                 "project_id": project_id,
-                "key_id": str(key_id),
                 "name": process_name,
             })
         except Exception:
