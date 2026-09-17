@@ -16,7 +16,7 @@ from supervisor.agent.nodes.ensure_active_process import make_ensure_active_proc
 from supervisor.agent.nodes.expand_graph import expand_graph
 from supervisor.agent.nodes.extract_memory_update import extract_memory_update
 from supervisor.agent.nodes.finalize_cycle import finalize_cycle
-from supervisor.agent.nodes.load_process_context import load_process_context
+from supervisor.agent.nodes.load_process_context import make_load_process_context
 from supervisor.agent.nodes.read_inbox import make_read_inbox_node
 from supervisor.agent.nodes.record_intervention import record_intervention
 from supervisor.agent.nodes.review import review
@@ -72,12 +72,13 @@ def build_graph(
 
     graph.add_node("read_inbox", make_read_inbox_node(inbox, batch_size=batch_size, run_id=run_id))
     process_service = ProcessService(memory)
+    load_context = make_load_process_context(memory)
     graph.add_node("ensure_active_process", make_ensure_active_process(process_service))
-    graph.add_node("load_process_context_before_update", load_process_context)
+    graph.add_node("load_process_context_before_update", load_context)
     graph.add_node("assess_process_continuity", assess_process_continuity)
     graph.add_node("extract_memory_update", extract_memory_update)
     graph.add_node("apply_memory_update", apply_memory_update)
-    graph.add_node("load_process_context_after_update", load_process_context)
+    graph.add_node("load_process_context_after_update", load_context)
     graph.add_node("detect_progress_stall", detect_progress_stall)
     graph.add_node("review", review)
     graph.add_node("expand_graph", expand_graph)
@@ -86,7 +87,7 @@ def build_graph(
     graph.add_node("write_process_summary", write_process_summary)
     graph.add_node("close_current_process", make_close_current_process(process_service))
     graph.add_node("start_new_process", make_start_new_process(process_service))
-    graph.add_node("load_new_process_context", load_process_context)
+    graph.add_node("load_new_process_context", load_context)
     graph.add_node("finalize_cycle", finalize_cycle)
 
     graph.add_edge(START, "read_inbox")

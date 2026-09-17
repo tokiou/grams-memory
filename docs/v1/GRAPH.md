@@ -454,8 +454,8 @@ interventions.
 
 ### `ensure_active_process.py`
 
-Reuses an existing ACTIVE process or creates the first process through Memory
-MCP. It does not detect pivots, assess strategy quality, or use an LLM.
+Loads the existing ACTIVE process through Memory MCP. It does not create a
+process, detect pivots, assess strategy quality, or use an LLM.
 
 ### `load_process_context.py`
 
