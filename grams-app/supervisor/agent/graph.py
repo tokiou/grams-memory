@@ -10,7 +10,7 @@ from supervisor.inbox import EventInbox
 from supervisor.memory.client import MemoryClient
 from supervisor.agent.nodes.apply_memory_update import apply_memory_update
 from supervisor.agent.nodes.assess_process_continuity import assess_process_continuity
-from supervisor.agent.nodes.close_current_process import close_current_process
+from supervisor.agent.nodes.close_current_process import make_close_current_process
 from supervisor.agent.nodes.detect_progress_stall import detect_progress_stall
 from supervisor.agent.nodes.ensure_active_process import make_ensure_active_process
 from supervisor.agent.nodes.expand_graph import expand_graph
@@ -21,8 +21,9 @@ from supervisor.agent.nodes.read_inbox import make_read_inbox_node
 from supervisor.agent.nodes.record_intervention import record_intervention
 from supervisor.agent.nodes.review import review
 from supervisor.agent.nodes.send_intervention import send_intervention
-from supervisor.agent.nodes.start_new_process import start_new_process
+from supervisor.agent.nodes.start_new_process import make_start_new_process
 from supervisor.agent.nodes.write_process_summary import write_process_summary
+from supervisor.agent.services.process_service import ProcessService
 from supervisor.agent.state import SupervisorState
 
 
@@ -70,7 +71,8 @@ def build_graph(
     graph = StateGraph(SupervisorState)
 
     graph.add_node("read_inbox", make_read_inbox_node(inbox, batch_size=batch_size, run_id=run_id))
-    graph.add_node("ensure_active_process", make_ensure_active_process(memory))
+    process_service = ProcessService(memory)
+    graph.add_node("ensure_active_process", make_ensure_active_process(process_service))
     graph.add_node("load_process_context_before_update", load_process_context)
     graph.add_node("assess_process_continuity", assess_process_continuity)
     graph.add_node("extract_memory_update", extract_memory_update)
@@ -82,8 +84,8 @@ def build_graph(
     graph.add_node("send_intervention", send_intervention)
     graph.add_node("record_intervention", record_intervention)
     graph.add_node("write_process_summary", write_process_summary)
-    graph.add_node("close_current_process", close_current_process)
-    graph.add_node("start_new_process", start_new_process)
+    graph.add_node("close_current_process", make_close_current_process(process_service))
+    graph.add_node("start_new_process", make_start_new_process(process_service))
     graph.add_node("load_new_process_context", load_process_context)
     graph.add_node("finalize_cycle", finalize_cycle)
 

@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from supervisor.agent.nodes.ensure_active_process import make_ensure_active_process
+from supervisor.agent.services.process_service import ProcessService
 
 
 class FakeMemory:
@@ -24,7 +25,7 @@ class FakeMemory:
 def test_returns_existing_active_process_without_creating_memory():
     async def scenario():
         memory = FakeMemory(active={"ID": "process-existing"})
-        node = make_ensure_active_process(memory)
+        node = make_ensure_active_process(ProcessService(memory))
 
         result = await node({"root_session_id": "session-1", "project_id": "project-1"})
 
@@ -40,19 +41,16 @@ def test_returns_existing_active_process_without_creating_memory():
 def test_rejects_missing_active_process_without_creating_one():
     async def scenario():
         memory = FakeMemory()
-        node = make_ensure_active_process(memory)
+        node = make_ensure_active_process(ProcessService(memory))
 
         try:
-            await node({"root_session_id": "session-1"})
+            await node({"root_session_id": "session-1", "project_id": "project-1"})
         except RuntimeError as error:
             assert str(error) == "No active process found for project project-1"
         else:
             raise AssertionError("expected missing active process error")
 
-        assert memory.calls == [
-            ("ensure_session_project", "session-1"),
-            ("get_active_process", "project-1"),
-        ]
+        assert memory.calls == [("get_active_process", "project-1")]
 
     asyncio.run(scenario())
 
@@ -60,7 +58,7 @@ def test_rejects_missing_active_process_without_creating_one():
 def test_requires_root_session_when_project_is_not_in_state():
     async def scenario():
         memory = FakeMemory()
-        node = make_ensure_active_process(memory)
+        node = make_ensure_active_process(ProcessService(memory))
 
         try:
             await node({})

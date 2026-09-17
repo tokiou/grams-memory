@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from supervisor.agent.state import SupervisorState
-from supervisor.memory.client import MemoryClient, _field
+from supervisor.agent.services.process_service import ProcessService
 
 
-def make_ensure_active_process(memory: MemoryClient):
+def make_ensure_active_process(processes: ProcessService):
     """Build the deterministic active-process lookup node."""
 
     async def ensure_active_process(state: SupervisorState) -> dict[str, str]:
@@ -16,22 +16,13 @@ def make_ensure_active_process(memory: MemoryClient):
         resolves the current process identity; process creation belongs to the
         process-lifecycle flow.
         """
-        root_session_id = state.get("root_session_id")
-        if not root_session_id:
+        if not state.get("root_session_id"):
             raise ValueError("root_session_id is required to ensure an active process")
-
         project_id = state.get("project_id")
         if not project_id:
-            project_id = await memory.ensure_session_project(root_session_id)
-
-        active = await memory.get_active_process(project_id)
-        if active is not None:
-            process_id = _field(active, "id")
-            if not process_id:
-                raise RuntimeError("Memory MCP returned an active process without an id")
-            return {"project_id": project_id, "active_process_id": str(process_id)}
-
-        raise RuntimeError(f"No active process found for project {project_id}")
+            raise ValueError("project_id is required to ensure an active process")
+        active = await processes.ensure_active(project_id)
+        return {"project_id": project_id, "active_process_id": active["id"]}
 
     return ensure_active_process
 
