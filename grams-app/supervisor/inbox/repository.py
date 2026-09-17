@@ -8,7 +8,7 @@ import asyncio
 import aiosqlite
 import sqlite3
 
-from .model import EventStatus, SupervisorEvent, SupervisorEventInput, utcnow
+from supervisor.inbox.model import EventStatus, SupervisorEvent, SupervisorEventInput, utcnow
 
 
 def _stamp(value: datetime) -> str:
@@ -168,6 +168,12 @@ class InboxRepository:
 
     async def pending_roots(self) -> list[str]:
         rows = await (await self.connection.execute("SELECT DISTINCT root_session_id FROM supervisor_events WHERE status = 'PENDING' AND available_at <= ? ORDER BY root_session_id", (_stamp(utcnow()),))).fetchall()
+        return [str(row[0]) for row in rows]
+
+    async def known_roots(self) -> list[str]:
+        rows = await (await self.connection.execute(
+            "SELECT DISTINCT root_session_id FROM supervisor_events ORDER BY root_session_id",
+        )).fetchall()
         return [str(row[0]) for row in rows]
 
     async def claimable_roots(self) -> list[str]:
