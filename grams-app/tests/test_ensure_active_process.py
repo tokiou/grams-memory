@@ -8,9 +8,8 @@ from supervisor.agent.nodes.ensure_active_process import make_ensure_active_proc
 
 
 class FakeMemory:
-    def __init__(self, *, active=None, processes=None):
+    def __init__(self, *, active=None):
         self.active = active
-        self.processes = processes or []
         self.calls = []
 
     async def ensure_session_project(self, root_session_id):
@@ -20,14 +19,6 @@ class FakeMemory:
     async def get_active_process(self, project_id):
         self.calls.append(("get_active_process", project_id))
         return self.active
-
-    async def list_processes(self, project_id):
-        self.calls.append(("list_processes", project_id))
-        return self.processes
-
-    async def create_process(self, process):
-        self.calls.append(("create_process", process))
-        return {"id": "process-1"}
 
 
 def test_returns_existing_active_process_without_creating_memory():
@@ -46,26 +37,22 @@ def test_returns_existing_active_process_without_creating_memory():
     asyncio.run(scenario())
 
 
-def test_creates_process_key_and_categories_when_no_active_process_exists():
+def test_rejects_missing_active_process_without_creating_one():
     async def scenario():
-        memory = FakeMemory(processes=[{"name": "process_001"}, {"name": "process_003"}])
+        memory = FakeMemory()
         node = make_ensure_active_process(memory)
 
-        result = await node({"root_session_id": "session-1"})
+        try:
+            await node({"root_session_id": "session-1"})
+        except RuntimeError as error:
+            assert str(error) == "No active process found for project project-1"
+        else:
+            raise AssertionError("expected missing active process error")
 
-        assert result == {"project_id": "project-1", "active_process_id": "process-1"}
-        assert memory.calls[:2] == [
+        assert memory.calls == [
             ("ensure_session_project", "session-1"),
             ("get_active_process", "project-1"),
         ]
-        assert memory.calls[2] == (
-            "list_processes",
-            "project-1",
-        )
-        assert memory.calls[3][1] == {
-            "project_id": "project-1",
-            "name": "process_004",
-        }
 
     asyncio.run(scenario())
 
