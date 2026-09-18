@@ -36,6 +36,7 @@ class MemoryClient(Protocol):
 
     async def get_manifest(self) -> dict[str, Any]: ...
     async def get_active_process(self, project_id: str) -> dict[str, Any] | None: ...
+    async def get_process(self, process_id: str) -> dict[str, Any] | None: ...
     async def create_process(self, process: dict[str, Any]) -> dict[str, Any]: ...
     async def close_process(self, process_id: str, status: str) -> dict[str, Any]: ...
     async def list_processes(self, project_id: str) -> list[dict[str, Any]]: ...
@@ -243,6 +244,12 @@ class MCPMemoryClient:
 
     async def get_active_process(self, project_id: str) -> dict[str, Any] | None:
         return await self._call_tool("process_get_active", {"id": project_id})
+
+    async def get_process(self, process_id: str) -> dict[str, Any] | None:
+        result = await self._call_tool("process_get", {"id": process_id})
+        if result is not None and not isinstance(result, dict):
+            raise RuntimeError("Memory MCP process_get returned an invalid process")
+        return result
 
     async def create_process(self, process: dict[str, Any]) -> dict[str, Any]:
         result = await self._call_tool("process_create", process)
