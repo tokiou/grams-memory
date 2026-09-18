@@ -5,7 +5,17 @@
 This document defines what must be implemented to rebuild the first
 process-based version of the GRAMS Supervisor from scratch.
 
-At this stage, the real logic of most nodes is intentionally not implemented.
+The current model boundary is intentional: Jev handles bounded structured
+decisions used for routing and classification; the generative LLM is limited to
+writing memory text and dynamic intervention messages. Neither model executes
+tools or owns durable state.
+
+The target v2 graph and the two-call Jev supervision contract are documented in
+[`docs/v2/JEV_OPENROUTER.md`](../v2/JEV_OPENROUTER.md).
+
+At this stage, the graph is being rebuilt around the Jev/generative boundary;
+the node list below is the target contract, not a claim that every node is
+currently present in the working tree.
 The current incremental implementation includes the Inbox claim boundary in
 `read_inbox`; the remaining nodes are still stubs. The following must exist:
 
@@ -14,7 +24,7 @@ The current incremental implementation includes the Inbox claim boundary in
 - `schemas.py` with the main structured outputs;
 - one file per node under `agent/nodes/`;
 - each function signature and a functional docstring describing its contract;
-- `prompts.py` with the base prompts for LLM-backed nodes.
+- `prompts.py` with prompts for the generative text operations.
 
 Each node must initially be a stub:
 
@@ -465,9 +475,9 @@ assessment, after memory updates, and after a new process starts.
 
 ### `assess_process_continuity.py`
 
-Uses recent events and process context to classify only SAME_PROCESS or
-NEW_PROCESS. It does not judge quality, intervene, write memory, or create the
-successor process.
+Uses an injected structured classifier with recent events and process context to
+classify only SAME_PROCESS or NEW_PROCESS. It does not judge quality, intervene,
+write memory, or create the successor process.
 
 ### `extract_memory_update.py`
 

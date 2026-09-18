@@ -34,6 +34,37 @@ LangGraph
 The receiver and Inbox are the durable transport layer. LangGraph is an
 orchestration layer over that transport; it is not the event store.
 
+## Model Responsibilities
+
+The complete v2 model boundary and target graph are documented in
+[`docs/v2/JEV_OPENROUTER.md`](../v2/JEV_OPENROUTER.md).
+
+GRAMS uses two model services with deliberately separate responsibilities.
+
+### Jev: Structured Decisions
+
+Jev is used for typed, bounded decisions that influence routing:
+
+- process continuity: `SAME_PROCESS` or `NEW_PROCESS`;
+- review action: `CONTINUE`, `NEED_MORE_MEMORY`, `INTERVENE`, or
+  `CLOSE_PROCESS`;
+- progress/blockage and evidence-relevance scores;
+- duplicate and retrieval-priority classification.
+
+Jev does not write Memory MCP, operate the Inbox, call OpenCode, or generate
+durable text. LangGraph and deterministic Python code remain responsible for
+interpreting confidence, enforcing thresholds, and performing side effects.
+
+### Generative LLM: Text Only
+
+DeepSeek through OpenRouter is reserved for text generation:
+
+- memory titles and STRATEGY/EVIDENCE content;
+- the dynamic message delivered during an intervention.
+
+The generative model does not choose graph routes or call tools. Its output is
+validated by deterministic code before it can affect Memory MCP or OpenCode.
+
 ## Durable Event Boundary
 
 The receiver writes every accepted event to the SQLite table
