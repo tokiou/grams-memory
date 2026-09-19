@@ -5,3 +5,4 @@ jobs/
 no-upload
 __pycache__/
 *.py[cod]
+grams-app/memory-mcp/grams.db*

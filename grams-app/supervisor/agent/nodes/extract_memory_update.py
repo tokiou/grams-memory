@@ -1,13 +1,15 @@
-"""Memory-update extraction node stub."""
+from __future__ import annotations
+from supervisor.agent.prompts import MEMORY_UPDATE_SYSTEM_PROMPT
+from supervisor.agent.schemas import MEMORY_UPDATE_JSON_SCHEMA, validate_memory_proposal
+from supervisor.agent.state_builder import build_jev_process_state
 
-from supervisor.agent.state import SupervisorState
-
-
-async def extract_memory_update(state: SupervisorState) -> dict:
-    """Propose new STRATEGY, EVIDENCE, and relation data from recent events.
-
-    Future implementation: compare events with process context to avoid
-    duplicates. It must not create SUMMARY, decide continuation, intervene, or
-    write to Memory MCP. It uses a dedicated LLM prompt.
-    """
-    raise NotImplementedError
+def make_extract_memory_update(openrouter):
+    async def node(state):
+        value = await openrouter.generate_json(
+            operation="EXTRACT_MEMORY_UPDATE",
+            payload=build_jev_process_state(state),
+            system_prompt=MEMORY_UPDATE_SYSTEM_PROMPT,
+            schema=MEMORY_UPDATE_JSON_SCHEMA,
+        )
+        return {"proposed_memory_update": validate_memory_proposal(value)}
+    return node

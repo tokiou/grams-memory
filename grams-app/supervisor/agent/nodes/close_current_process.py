@@ -1,31 +1,38 @@
-"""Close the current process through the process lifecycle service."""
+from __future__ import annotations
 
-from supervisor.agent.state import SupervisorState
-from typing import cast
-
-from supervisor.agent.services.process_service import ProcessService, TerminalProcessStatus
+from supervisor.memory.client import _field
+from supervisor.agent.nodes.common import cycle_key
 
 
-def make_close_current_process(processes: ProcessService):
-    async def close_current_process(state: SupervisorState) -> dict:
-        process_id = state.get("active_process_id")
-        if not process_id:
-            raise ValueError("active_process_id is required to close a process")
-        transition = state.get("pending_process_transition")
-        outcome = "SUPERSEDED" if transition else state.get("review_decision", {}).get("process_outcome")
-        if outcome not in ProcessService._TERMINAL:
-            raise ValueError("a terminal process outcome is required to close a process")
-        closed = await processes.close_current(process_id, cast(TerminalProcessStatus, outcome))
-        return {"closed_process_id": closed["id"]}
+def make_close_current_process(process_service, memory):
+    async def node(state):
+        summary = state.get("pending_process_summary") or {}
+        pivot = state.get("process_continuity", {}).get("decision") == "NEW_PROCESS"
+        outcome = "SUPERSEDED" if pivot else summary.get("outcome")
+        if summary.get("outcome") != outcome:
+            raise ValueError("pending process summary has an inconsistent outcome")
+        summary_category_id = state.get("process_context", {}).get("key", {}).get("summary_category_id")
+        content = summary.get("content")
+        if not summary_category_id or not isinstance(content, str) or not content.strip():
+            raise ValueError("a SUMMARY category and content are required before closing a process")
 
-    return close_current_process
+        marker = cycle_key(state)
+        title = f"Process summary [{marker}]: {outcome}"
+        existing = await memory.search(category_id=summary_category_id, query=marker, limit=50)
+        duplicate = next(
+            (item for item in existing if str(_field(item, "title") or "").strip() == title),
+            None,
+        )
+        if duplicate is None:
+            created = await memory.create({
+                "category_id": summary_category_id,
+                "title": title,
+                "content": content.strip(),
+                "source": "supervisor",
+            })
+            if not _field(created, "id") or str(_field(created, "category_id")) != str(summary_category_id):
+                raise RuntimeError("Memory MCP returned an invalid process summary")
+        closed = await process_service.close_current(state["active_process_id"], outcome)
+        return {"final_status": "CLOSED", "closed_process": closed}
 
-
-async def close_current_process(state: SupervisorState) -> dict:
-    """Persist the pending summary and close the ACTIVE process.
-
-    Future implementation: apply SUCCEEDED, FAILED, SUPERSEDED, or ABANDONED
-    through Memory MCP. A pending process transition normally closes the old
-    process as SUPERSEDED. It must not use an LLM.
-    """
-    raise RuntimeError("close_current_process requires a ProcessService; use make_close_current_process")
+    return node

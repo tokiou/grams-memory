@@ -1,1 +1,1 @@
-"""Supervisor LangGraph node stubs."""
+"""Small, deterministic Supervisor nodes."""

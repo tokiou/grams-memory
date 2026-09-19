@@ -113,11 +113,11 @@ The full v1 direction is documented in `ARCHITECTURE.md` and
 The receiver runs on port `8765`:
 
 ```bash
-.venv/bin/uvicorn supervisor.app:app \
-  --app-dir grams-app \
-  --host 0.0.0.0 \
-  --port 8765
+./scripts/run_supervisor.sh
 ```
+
+Use the launcher so the host Supervisor receives the credentials from `.env`
+used by the JEV and OpenRouter clients.
 
 The standalone Go Memory MCP runs independently:
 

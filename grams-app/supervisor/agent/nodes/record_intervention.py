@@ -1,12 +1,30 @@
-"""Intervention-recording node stub."""
+from __future__ import annotations
 
-from supervisor.agent.state import SupervisorState
+from supervisor.memory.client import _field
 
-
-async def record_intervention(state: SupervisorState) -> dict:
-    """Persist an intervention audit record for the active process.
-
-    Future implementation: record the reason, evidence, guidance, and delivery
-    result through Memory MCP. It must not use an LLM.
-    """
-    raise NotImplementedError
+def make_record_intervention(memory):
+    async def node(state):
+        category_id = state.get("process_context", {}).get("key", {}).get("evidence_category_id")
+        message = state.get("intervention_result", {}).get("message")
+        if not category_id:
+            raise ValueError("evidence_category_id is required to record an intervention")
+        if not isinstance(message, str) or not message:
+            raise ValueError("delivered intervention message is required for audit")
+        intervention = state.get("intervention_result", {})
+        if intervention.get("audit_recorded") and intervention.get("audit_memory_id"):
+            return {"intervention_result": intervention}
+        result = await memory.create({
+            "category_id": category_id,
+            "title": "Supervisor intervention",
+            "content": message,
+            "source": "supervisor",
+        })
+        memory_id = _field(result, "id")
+        if not memory_id or str(_field(result, "category_id")) != str(category_id):
+            raise RuntimeError("Memory MCP returned an invalid intervention evidence record")
+        return {"intervention_result": {
+            **intervention,
+            "audit_recorded": True,
+            "audit_memory_id": str(memory_id),
+        }}
+    return node

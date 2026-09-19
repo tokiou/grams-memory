@@ -8,6 +8,31 @@ The central design principle is:
 
 The Supervisor must not review the current execution while ignoring the memory of the process it is supervising.
 
+## Model Boundary
+
+The Supervisor separates structured decisions from text generation.
+
+Jev (TypeSafe System One) is the decision model for bounded, typed judgments
+that control orchestration. It is intended for process continuity, review
+actions, progress and blockage signals, relevance and duplicate classification,
+and retrieval prioritization. Jev returns structured choices, scores, and
+confidence; it does not execute tools, mutate Memory MCP, acknowledge Inbox
+events, or generate durable prose.
+
+The generative LLM, currently DeepSeek through OpenRouter, is reserved for the
+small set of operations that genuinely require text generation:
+
+- extracting titles and content for STRATEGY and EVIDENCE memories;
+- generating the dynamic message for an intervention.
+
+The detailed v2 flow, Jev question decomposition, canonical state, and replay
+plan are documented in `docs/v2/JEV_OPENROUTER.md`.
+
+Memory persistence, process lifecycle, graph retrieval, Inbox leases, ACKs, and
+all safety thresholds remain deterministic Python orchestration. A low Jev
+confidence must be handled by explicit code policy, never by allowing the model
+to execute an unbounded tool call.
+
 Every meaningful review is therefore conditioned on an up-to-date view of the current process graph.
 
 Architecture

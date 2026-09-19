@@ -8,9 +8,20 @@ from supervisor.agent.nodes.ensure_active_process import make_ensure_active_proc
 from supervisor.agent.services.process_service import ProcessService
 
 
+def process(process_id="process-existing", status="ACTIVE", name="process_001"):
+    return {
+        "ID": process_id,
+        "ProjectID": "project-1",
+        "KeyID": f"key-{process_id}",
+        "Name": name,
+        "Status": status,
+    }
+
+
 class FakeMemory:
-    def __init__(self, *, active=None):
+    def __init__(self, *, active=None, processes=None):
         self.active = active
+        self.processes = list(processes or [])
         self.calls = []
 
     async def ensure_session_project(self, root_session_id):
@@ -21,45 +32,44 @@ class FakeMemory:
         self.calls.append(("get_active_process", project_id))
         return self.active
 
+    async def list_processes(self, project_id):
+        self.calls.append(("list_processes", project_id))
+        return self.processes
 
-def test_returns_existing_active_process_without_creating_memory():
+    async def create_process(self, value):
+        self.calls.append(("create_process", value))
+        return process(name=value["name"])
+
+
+def test_returns_existing_strict_active_process_without_creating_memory():
     async def scenario():
-        memory = FakeMemory(active={"ID": "process-existing"})
+        memory = FakeMemory(active=process())
         node = make_ensure_active_process(ProcessService(memory))
-
         result = await node({"root_session_id": "session-1", "project_id": "project-1"})
-
-        assert result == {
-            "project_id": "project-1",
-            "active_process_id": "process-existing",
-        }
+        assert result == {"project_id": "project-1", "active_process_id": "process-existing"}
         assert memory.calls == [("get_active_process", "project-1")]
 
     asyncio.run(scenario())
 
 
-def test_rejects_missing_active_process_without_creating_one():
+def test_creates_first_process_only_for_an_empty_project():
     async def scenario():
         memory = FakeMemory()
         node = make_ensure_active_process(ProcessService(memory))
-
-        try:
-            await node({"root_session_id": "session-1", "project_id": "project-1"})
-        except RuntimeError as error:
-            assert str(error) == "No active process found for project project-1"
-        else:
-            raise AssertionError("expected missing active process error")
-
-        assert memory.calls == [("get_active_process", "project-1")]
+        result = await node({"root_session_id": "session-1", "project_id": "project-1"})
+        assert result["active_process_id"] == "process-existing"
+        assert memory.calls[-1] == ("create_process", {
+            "project_id": "project-1",
+            "name": "process_001",
+            "description": "Initial supervised execution process",
+        })
 
     asyncio.run(scenario())
 
 
 def test_requires_root_session_when_project_is_not_in_state():
     async def scenario():
-        memory = FakeMemory()
-        node = make_ensure_active_process(ProcessService(memory))
-
+        node = make_ensure_active_process(ProcessService(FakeMemory()))
         try:
             await node({})
         except ValueError as error:

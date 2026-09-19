@@ -1,36 +1,23 @@
-"""Ensure that a session has one active process in Memory MCP."""
-
 from __future__ import annotations
 
-from supervisor.agent.state import SupervisorState
-from supervisor.agent.services.process_service import ProcessService
+from supervisor.agent.nodes.common import cycle_key
 
-
-def make_ensure_active_process(processes: ProcessService):
-    """Build the deterministic active-process lookup node."""
-
-    async def ensure_active_process(state: SupervisorState) -> dict[str, str]:
-        """Ensure and return the ACTIVE process identity for this session.
-
-        The Project is the durable scope for ``root_session_id``. The node only
-        resolves the current process identity; process creation belongs to the
-        process-lifecycle flow.
-        """
+def make_ensure_active_process(process_service):
+    async def node(state):
         if not state.get("root_session_id"):
             raise ValueError("root_session_id is required to ensure an active process")
-        project_id = state.get("project_id")
-        if not project_id:
-            raise ValueError("project_id is required to ensure an active process")
-        active = await processes.ensure_active(project_id)
-        return {"project_id": project_id, "active_process_id": active["id"]}
-
-    return ensure_active_process
-
-
-async def ensure_active_process(state: SupervisorState) -> dict[str, str]:
-    """Compatibility wrapper requiring an injected Memory MCP client.
-
-    Graph construction should use ``make_ensure_active_process`` so the client
-    dependency remains explicit and testable.
-    """
-    raise RuntimeError("ensure_active_process requires a Memory MCP client; use make_ensure_active_process")
+        project_id = state.get("project_id") or await process_service.memory.ensure_session_project(state["root_session_id"])
+        process = await process_service.ensure_active(
+            project_id,
+            cycle_key(state) if state.get("claimed_events") else None,
+        )
+        update = {
+            "project_id": project_id,
+            "active_process_id": process["id"],
+        }
+        if process.get("cycle_complete"):
+            update["cycle_already_completed"] = True
+        if process.get("recovered_transition"):
+            update["context_reload_reason"] = "new_process"
+        return update
+    return node

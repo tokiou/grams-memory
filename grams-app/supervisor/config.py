@@ -35,6 +35,13 @@ def _log_color(name: str, default: str) -> str:
     return value
 
 
+def _boolean(name: str, default: bool) -> bool:
+    value = os.getenv(name, "true" if default else "false").strip().lower()
+    if value not in {"true", "false", "1", "0", "yes", "no"}:
+        raise ValueError(f"{name} must be a boolean")
+    return value in {"true", "1", "yes"}
+
+
 @dataclass(frozen=True)
 class Config:
     """Validated settings for event ingress and Inbox persistence."""
@@ -50,6 +57,10 @@ class Config:
     log_color: str = "auto"
     log_lag_warn_ms: float | None = None
     log_file: Path | None = None
+    worker_enabled: bool = False
+    worker_poll_seconds: float = 0.25
+    memory_mcp_url: str = "http://127.0.0.1:8080"
+    opencode_base_url: str = "http://127.0.0.1:4096"
 
     def __post_init__(self) -> None:
         if not str(self.db_path).strip():
@@ -69,6 +80,10 @@ class Config:
         if self.log_lag_warn_ms is not None and (
                 not math.isfinite(self.log_lag_warn_ms) or self.log_lag_warn_ms < 0):
             raise ValueError("log_lag_warn_ms must be finite and non-negative")
+        if self.worker_poll_seconds <= 0 or not math.isfinite(self.worker_poll_seconds):
+            raise ValueError("worker poll interval must be positive and finite")
+        if not self.memory_mcp_url.strip() or not self.opencode_base_url.strip():
+            raise ValueError("external service URLs must not be empty")
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -92,4 +107,8 @@ class Config:
             ),
             log_file=Path(os.environ["GRAMS_LOG_FILE"]).expanduser()
             if os.getenv("GRAMS_LOG_FILE") else None,
+            worker_enabled=_boolean("GRAMS_SUPERVISOR_WORKER_ENABLED", True),
+            worker_poll_seconds=_positive_float("GRAMS_SUPERVISOR_WORKER_POLL_SECONDS", 0.25),
+            memory_mcp_url=os.getenv("GRAMS_MCP_URL", "http://127.0.0.1:8080"),
+            opencode_base_url=os.getenv("OPENCODE_BASE_URL", "http://127.0.0.1:4096"),
         )

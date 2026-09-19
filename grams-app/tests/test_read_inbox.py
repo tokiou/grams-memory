@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from supervisor.agent.nodes.read_inbox import make_read_inbox_node
+from supervisor.agent.nodes.read_inbox import make_read_inbox
 from supervisor.inbox.model import EventStatus, SupervisorEvent
 
 
@@ -30,7 +30,7 @@ def test_read_inbox_claims_serializable_events_with_leases():
                     lease_id="lease-1",
                 )]
 
-        node = make_read_inbox_node(FakeInbox(), batch_size=4, run_id="run-1")
+        node = make_read_inbox(FakeInbox(), batch_size=4, run_id="run-1")
         result = await node({"root_session_id": "session-1"})
 
         assert result == {
@@ -46,6 +46,7 @@ def test_read_inbox_claims_serializable_events_with_leases():
                 "source_run_id": None,
                 "sequence": None,
                 "ingress_id": None,
+                "cycle_id": None,
             }]
         }
 
@@ -58,7 +59,7 @@ def test_read_inbox_returns_empty_batch_without_claims():
             async def claim_pending(self, root_session_id, limit, *, run_id):
                 return []
 
-        node = make_read_inbox_node(FakeInbox())
+        node = make_read_inbox(FakeInbox())
         assert await node({"root_session_id": "session-1"}) == {"claimed_events": []}
 
     asyncio.run(scenario())

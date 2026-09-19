@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import logging
 import sqlite3
 
-from supervisor.inbox.model import SupervisorEvent, SupervisorEventInput
+from supervisor.inbox.model import EventStatus, SupervisorEvent, SupervisorEventInput
 from supervisor.inbox.repository import InboxRepository
 from supervisor.observability import elapsed_ms, emit, event_correlation, monotonic_ns, source_lag_info
 
@@ -47,8 +47,54 @@ class EventInbox:
     async def ack(self, event_id: str, lease_id: str | None = None) -> bool:
         return await self.mark_processed(event_id, lease_id)
 
+    async def ack_batch(self, claims: list[tuple[str, str]]) -> bool:
+        result = await self._retry_locked(lambda: self.repository.mark_processed_batch(claims))
+        emit(
+            logger,
+            logging.INFO if result else logging.ERROR,
+            "events_acknowledged" if result else "lease_conflict",
+            event_ids=[event_id for event_id, _ in claims],
+            event_count=len(claims),
+            outcome="ok" if result else "rejected",
+        )
+        return result
+
+    async def renew_lease(self, event_id: str, lease_id: str) -> bool:
+        return await self.renew_leases([(event_id, lease_id)])
+
+    async def renew_leases(self, claims: list[tuple[str, str]]) -> bool:
+        renewed = await self._retry_locked(lambda: self.repository.renew_leases(claims, self.lease_seconds))
+        if not renewed:
+            emit(
+                logger,
+                logging.ERROR,
+                "lease_conflict",
+                event_ids=[event_id for event_id, _ in claims],
+                error="lease renewal failed",
+            )
+        return renewed
+
     async def fail(self, event_id: str, error: str, retry_at: datetime | None = None, lease_id: str | None = None) -> None:
         await self.mark_failed(event_id, error, retry_at, lease_id)
+
+    async def fail_batch(
+        self,
+        claims: list[tuple[str, str]],
+        error: str,
+        retry_at: datetime | None = None,
+    ) -> None:
+        status = await self._retry_locked(
+            lambda: self.repository.mark_failed_batch(claims, error, retry_at)
+        )
+        emit(
+            logger,
+            logging.WARNING if status is EventStatus.PENDING else logging.ERROR,
+            "event_retry_scheduled" if status is EventStatus.PENDING else "event_failed",
+            event_ids=[event_id for event_id, _ in claims],
+            event_count=len(claims),
+            status=status.value if status else None,
+            error=error,
+        )
 
     async def pending_count(self, root_session_id: str | None = None) -> int:
         return await self.repository.count_pending(root_session_id)
@@ -96,6 +142,14 @@ class EventInbox:
 
     async def known_roots(self) -> list[str]:
         return await self.repository.known_roots()
+
+    async def get_objective(self, root_session_id: str) -> str | None:
+        return await self.repository.get_objective(root_session_id)
+
+    async def set_objective(self, root_session_id: str, objective: str) -> str:
+        if not objective.strip():
+            raise ValueError("session objective must not be empty")
+        return await self.repository.set_objective(root_session_id, objective.strip())
 
     async def claimable_roots(self) -> list[str]:
         return await self.repository.claimable_roots()

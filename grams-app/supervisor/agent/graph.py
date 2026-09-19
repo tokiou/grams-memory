@@ -1,133 +1,115 @@
-"""LangGraph topology for the GRAMS Supervisor skeleton."""
-
-from __future__ import annotations
-
-from typing import Literal
+"""LangGraph wiring for the v2 Supervisor."""
 
 from langgraph.graph import END, START, StateGraph
 
-from supervisor.inbox import EventInbox
-from supervisor.memory.client import MemoryClient
-from supervisor.agent.nodes.apply_memory_update import apply_memory_update
-from supervisor.agent.nodes.assess_process_continuity import assess_process_continuity
+from supervisor.agent.nodes.apply_memory_update import make_apply_memory_update
+from supervisor.agent.nodes.assess_process_continuity import make_assess_process_continuity
+from supervisor.agent.nodes.build_intervention import make_build_intervention
 from supervisor.agent.nodes.close_current_process import make_close_current_process
-from supervisor.agent.nodes.detect_progress_stall import detect_progress_stall
 from supervisor.agent.nodes.ensure_active_process import make_ensure_active_process
-from supervisor.agent.nodes.expand_graph import expand_graph
-from supervisor.agent.nodes.extract_memory_update import extract_memory_update
-from supervisor.agent.nodes.finalize_cycle import finalize_cycle
+from supervisor.agent.nodes.expand_graph import make_expand_graph
+from supervisor.agent.nodes.extract_memory_update import make_extract_memory_update
+from supervisor.agent.nodes.finalize_cycle import make_finalize_cycle
 from supervisor.agent.nodes.load_process_context import make_load_process_context
-from supervisor.agent.nodes.read_inbox import make_read_inbox_node
-from supervisor.agent.nodes.record_intervention import record_intervention
-from supervisor.agent.nodes.review import review
-from supervisor.agent.nodes.send_intervention import send_intervention
+from supervisor.agent.nodes.read_inbox import make_read_inbox
+from supervisor.agent.nodes.record_intervention import make_record_intervention
+from supervisor.agent.nodes.send_intervention import make_send_intervention
 from supervisor.agent.nodes.start_new_process import make_start_new_process
-from supervisor.agent.nodes.write_process_summary import write_process_summary
+from supervisor.agent.nodes.supervision_decision import make_supervision_decision
+from supervisor.agent.nodes.write_process_summary import make_write_process_summary
 from supervisor.agent.services.process_service import ProcessService
 from supervisor.agent.state import SupervisorState
 
 
-def route_after_read_inbox(state: SupervisorState) -> Literal["HAS_EVENTS", "NO_EVENTS"]:
-    """Route based on whether READ_INBOX claimed a new event batch."""
-    return "HAS_EVENTS" if state.get("claimed_events") else "NO_EVENTS"
-
-
-def route_after_process_continuity(
-    state: SupervisorState,
-) -> Literal["SAME_PROCESS", "NEW_PROCESS"]:
-    """Route according to the structured process-continuity output."""
-    return state["process_continuity"]["decision"]
-
-
-def route_after_review(
-    state: SupervisorState,
-) -> Literal["CONTINUE", "NEED_MORE_MEMORY", "INTERVENE", "CLOSE_PROCESS"]:
-    """Route according to the structured REVIEW decision."""
-    return state["review_decision"]["action"]
-
-
-def route_after_close_process(
-    state: SupervisorState,
-) -> Literal["START_NEW_PROCESS", "FINISH_CYCLE"]:
-    """Route to a successor process only when a transition is pending."""
-    return "START_NEW_PROCESS" if state.get("pending_process_transition") else "FINISH_CYCLE"
-
-
 def build_graph(
     *,
-    inbox: EventInbox,
-    memory: MemoryClient,
-    batch_size: int = 20,
-    run_id: str | None = None,
+    inbox,
+    memory,
+    jev,
+    openrouter,
+    opencode,
+    process_service=None,
+    batch_size=20,
+    run_id=None,
+    max_expansion_depth=2,
     checkpointer=None,
 ):
-    """Build and compile the initial GRAMS Supervisor graph skeleton.
+    if jev is None:
+        raise ValueError("build_graph requires a Jev client")
+    if openrouter is None:
+        raise ValueError("build_graph requires an OpenRouter client")
+    if opencode is None:
+        raise ValueError("build_graph requires an OpenCode client")
+    process_service = process_service or ProcessService(memory)
 
-    Most node implementations remain stubs. The topology enforces that events
-    are read first, an active process exists, process context is loaded before
-    continuity/review, memory updates are applied before the second context
-    load, and review decisions route deterministically.
-    """
     graph = StateGraph(SupervisorState)
+    graph.add_node("READ_INBOX", make_read_inbox(inbox, batch_size=batch_size, run_id=run_id))
+    graph.add_node("ENSURE_ACTIVE_PROCESS", make_ensure_active_process(process_service))
+    graph.add_node("LOAD_PROCESS_CONTEXT", make_load_process_context(memory))
+    graph.add_node("ASSESS_PROCESS_CONTINUITY", make_assess_process_continuity(jev))
+    graph.add_node("EXTRACT_MEMORY_UPDATE", make_extract_memory_update(openrouter))
+    graph.add_node("APPLY_MEMORY_UPDATE", make_apply_memory_update(memory))
+    graph.add_node("SUPERVISION_DECISION", make_supervision_decision(jev))
+    graph.add_node("EXPAND_GRAPH", make_expand_graph(memory, max_depth=max_expansion_depth))
+    graph.add_node("WRITE_PROCESS_SUMMARY", make_write_process_summary(openrouter))
+    graph.add_node("CLOSE_CURRENT_PROCESS", make_close_current_process(process_service, memory))
+    graph.add_node("START_NEW_PROCESS", make_start_new_process(process_service))
+    graph.add_node("BUILD_INTERVENTION", make_build_intervention(openrouter))
+    graph.add_node("SEND_INTERVENTION", make_send_intervention(opencode, memory))
+    graph.add_node("RECORD_INTERVENTION", make_record_intervention(memory))
+    graph.add_node("FINALIZE", make_finalize_cycle(inbox))
 
-    graph.add_node("read_inbox", make_read_inbox_node(inbox, batch_size=batch_size, run_id=run_id))
-    process_service = ProcessService(memory)
-    load_context = make_load_process_context(memory)
-    graph.add_node("ensure_active_process", make_ensure_active_process(process_service))
-    graph.add_node("load_process_context_before_update", load_context)
-    graph.add_node("assess_process_continuity", assess_process_continuity)
-    graph.add_node("extract_memory_update", extract_memory_update)
-    graph.add_node("apply_memory_update", apply_memory_update)
-    graph.add_node("load_process_context_after_update", load_context)
-    graph.add_node("detect_progress_stall", detect_progress_stall)
-    graph.add_node("review", review)
-    graph.add_node("expand_graph", expand_graph)
-    graph.add_node("send_intervention", send_intervention)
-    graph.add_node("record_intervention", record_intervention)
-    graph.add_node("write_process_summary", write_process_summary)
-    graph.add_node("close_current_process", make_close_current_process(process_service))
-    graph.add_node("start_new_process", make_start_new_process(process_service))
-    graph.add_node("load_new_process_context", load_context)
-    graph.add_node("finalize_cycle", finalize_cycle)
-
-    graph.add_edge(START, "read_inbox")
+    graph.add_edge(START, "READ_INBOX")
     graph.add_conditional_edges(
-        "read_inbox",
-        route_after_read_inbox,
-        {"HAS_EVENTS": "ensure_active_process", "NO_EVENTS": END},
+        "READ_INBOX",
+        lambda state: "events" if state.get("claimed_events") else "empty",
+        {"events": "ENSURE_ACTIVE_PROCESS", "empty": END},
     )
-    graph.add_edge("ensure_active_process", "load_process_context_before_update")
-    graph.add_edge("load_process_context_before_update", "assess_process_continuity")
     graph.add_conditional_edges(
-        "assess_process_continuity",
-        route_after_process_continuity,
-        {"SAME_PROCESS": "extract_memory_update", "NEW_PROCESS": "write_process_summary"},
+        "ENSURE_ACTIVE_PROCESS",
+        lambda state: "complete" if state.get("cycle_already_completed") else "active",
+        {"complete": "FINALIZE", "active": "LOAD_PROCESS_CONTEXT"},
     )
-    graph.add_edge("extract_memory_update", "apply_memory_update")
-    graph.add_edge("apply_memory_update", "load_process_context_after_update")
-    graph.add_edge("load_process_context_after_update", "detect_progress_stall")
-    graph.add_edge("detect_progress_stall", "review")
     graph.add_conditional_edges(
-        "review",
-        route_after_review,
+        "LOAD_PROCESS_CONTEXT",
+        lambda state: state["context_route"],
         {
-            "CONTINUE": "finalize_cycle",
-            "NEED_MORE_MEMORY": "expand_graph",
-            "INTERVENE": "send_intervention",
-            "CLOSE_PROCESS": "write_process_summary",
+            "assess": "ASSESS_PROCESS_CONTINUITY",
+            "extract": "EXTRACT_MEMORY_UPDATE",
+            "supervise": "SUPERVISION_DECISION",
         },
     )
-    graph.add_edge("expand_graph", "review")
-    graph.add_edge("send_intervention", "record_intervention")
-    graph.add_edge("record_intervention", "finalize_cycle")
-    graph.add_edge("write_process_summary", "close_current_process")
     graph.add_conditional_edges(
-        "close_current_process",
-        route_after_close_process,
-        {"START_NEW_PROCESS": "start_new_process", "FINISH_CYCLE": "finalize_cycle"},
+        "ASSESS_PROCESS_CONTINUITY",
+        lambda state: state["process_continuity"]["decision"],
+        {"SAME_PROCESS": "EXTRACT_MEMORY_UPDATE", "NEW_PROCESS": "WRITE_PROCESS_SUMMARY"},
     )
-    graph.add_edge("start_new_process", "load_new_process_context")
-    graph.add_edge("load_new_process_context", "extract_memory_update")
-    graph.add_edge("finalize_cycle", END)
-
+    graph.add_edge("EXTRACT_MEMORY_UPDATE", "APPLY_MEMORY_UPDATE")
+    graph.add_edge("APPLY_MEMORY_UPDATE", "LOAD_PROCESS_CONTEXT")
+    graph.add_conditional_edges(
+        "SUPERVISION_DECISION",
+        lambda state: state["supervision_decision"]["action"],
+        {
+            "CONTINUE": "FINALIZE",
+            "NEED_MORE_MEMORY": "EXPAND_GRAPH",
+            "INTERVENE": "BUILD_INTERVENTION",
+            "CLOSE_PROCESS": "WRITE_PROCESS_SUMMARY",
+        },
+    )
+    graph.add_conditional_edges(
+        "EXPAND_GRAPH",
+        lambda state: "exhausted" if state.get("memory_expansion_exhausted") else "expanded",
+        {"expanded": "SUPERVISION_DECISION", "exhausted": "FINALIZE"},
+    )
+    graph.add_edge("BUILD_INTERVENTION", "SEND_INTERVENTION")
+    graph.add_edge("SEND_INTERVENTION", "RECORD_INTERVENTION")
+    graph.add_edge("RECORD_INTERVENTION", "FINALIZE")
+    graph.add_edge("WRITE_PROCESS_SUMMARY", "CLOSE_CURRENT_PROCESS")
+    graph.add_conditional_edges(
+        "CLOSE_CURRENT_PROCESS",
+        lambda state: "new" if state.get("process_continuity", {}).get("decision") == "NEW_PROCESS" else "final",
+        {"new": "START_NEW_PROCESS", "final": "FINALIZE"},
+    )
+    graph.add_edge("START_NEW_PROCESS", "LOAD_PROCESS_CONTEXT")
+    graph.add_edge("FINALIZE", END)
     return graph.compile(checkpointer=checkpointer)

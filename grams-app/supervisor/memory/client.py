@@ -27,7 +27,7 @@ class MemoryClient(Protocol):
     async def expand(self, memory_id: str, **filters: Any) -> dict[str, Any]: ...
     async def create(self, memory: dict[str, Any]) -> dict[str, Any]: ...
     async def update(self, memory_id: str, memory: dict[str, Any]) -> dict[str, Any]: ...
-    async def link(self, source: str, target: str, relation: str, **metadata: Any) -> dict[str, Any]: ...
+    async def link(self, source_id: str, target_id: str, relation: str, **metadata: Any) -> dict[str, Any]: ...
     async def archive(self, memory_id: str) -> dict[str, Any]: ...
     async def restore(self, memory_id: str) -> dict[str, Any]: ...
 
@@ -55,6 +55,8 @@ class MCPMemoryClient:
         self._request_id = 0
         self._session_id: str | None = None
         self._initialized = False
+        self._tools: set[str] = set()
+        self._tool_descriptions: list[dict[str, Any]] = []
         self._lock = asyncio.Lock()
 
     async def _request(self, method: str, params: dict[str, Any] | None = None) -> Any:
@@ -130,12 +132,23 @@ class MCPMemoryClient:
                 },
             )
             await self._notify("notifications/initialized")
+            tools_result = await self._request("tools/list")
+            tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else tools_result
+            if not isinstance(tools, list):
+                raise RuntimeError("Memory MCP tools/list returned an invalid tool list")
+            self._tool_descriptions = [tool for tool in tools if isinstance(tool, dict)]
+            self._tools = {
+                str(tool.get("name"))
+                for tool in self._tool_descriptions
+                if tool.get("name")
+            }
+            if "process_get_active" not in self._tools:
+                raise RuntimeError("Memory MCP missing required tool process_get_active")
             self._initialized = True
 
     async def list_tools(self) -> list[dict[str, Any]]:
         await self._ensure_initialized()
-        result = await self._request("tools/list")
-        return list(result.get("tools", [])) if isinstance(result, dict) else list(result or [])
+        return list(self._tool_descriptions)
 
     async def ensure_session_hierarchy(self, root_session_id: str) -> str:
         """Create the session project and its small, reusable memory taxonomy."""
@@ -243,7 +256,23 @@ class MCPMemoryClient:
         return manifest
 
     async def get_active_process(self, project_id: str) -> dict[str, Any] | None:
-        return await self._call_tool("process_get_active", {"id": project_id})
+        if not project_id.strip():
+            raise ValueError("project_id must not be empty")
+        result = await self._call_tool("process_get_active", {"id": project_id})
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise RuntimeError("Memory MCP process_get_active returned an invalid process")
+        process_id = _field(result, "id")
+        process_project_id = _field(result, "project_id")
+        status = _field(result, "status")
+        if not process_id or not process_project_id:
+            raise RuntimeError("Memory MCP process_get_active returned an incomplete process")
+        if str(process_project_id) != project_id:
+            raise RuntimeError("Memory MCP process_get_active returned a process for the wrong project")
+        if str(status).upper() != "ACTIVE":
+            raise RuntimeError(f"Memory MCP process_get_active returned process with status {status}")
+        return result
 
     async def get_process(self, process_id: str) -> dict[str, Any] | None:
         result = await self._call_tool("process_get", {"id": process_id})
@@ -273,7 +302,12 @@ class MCPMemoryClient:
 
     async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         await self._ensure_initialized()
-        result = await self._request("tools/call", {"name": name, "arguments": arguments})
+        try:
+            result = await self._request("tools/call", {"name": name, "arguments": arguments})
+        except RuntimeError as error:
+            if name in str(error):
+                raise
+            raise RuntimeError(f"Memory MCP {name} failed: {error}") from error
         if not isinstance(result, dict):
             return result
         if result.get("isError") is True:
@@ -346,8 +380,8 @@ class MCPMemoryClient:
             raise RuntimeError("Memory MCP memory_update returned an invalid memory")
         return result
 
-    async def link(self, source: str, target: str, relation: str, **metadata: Any) -> dict[str, Any]:
-        result = await self._call_tool("memory_link", {"source_id": source, "target_id": target, "relation": relation, **metadata})
+    async def link(self, source_id: str, target_id: str, relation: str, **metadata: Any) -> dict[str, Any]:
+        result = await self._call_tool("memory_link", {"source_id": source_id, "target_id": target_id, "relation": relation, **metadata})
         if not isinstance(result, dict):
             raise RuntimeError("Memory MCP memory_link returned an invalid edge")
         return result

@@ -1,37 +1,24 @@
-"""Create a successor process through the process lifecycle service."""
-
-from supervisor.agent.state import SupervisorState
-from supervisor.agent.services.process_service import ProcessService
+from __future__ import annotations
 
 
-def make_start_new_process(processes: ProcessService):
-    async def start_new_process(state: SupervisorState) -> dict:
+def make_start_new_process(process_service):
+    async def node(state):
         project_id = state.get("project_id")
-        predecessor_id = state.get("active_process_id")
-        transition = state.get("pending_process_transition")
-        if not project_id or not predecessor_id:
-            raise ValueError("project_id and active_process_id are required to start a process")
-        if not transition:
-            raise ValueError("pending_process_transition is required to start a successor")
-        name = transition.get("name") or transition.get("suggested_process_name")
-        if not name:
-            raise ValueError("pending process transition requires a name")
-        successor = await processes.create_successor(
-            project_id,
-            predecessor_id,
-            name,
-            transition.get("description", ""),
-        )
-        return {"active_process_id": successor["id"]}
+        predecessor_id = state.get("pending_process_transition", {}).get("predecessor_id")
+        if not project_id or predecessor_id != state.get("active_process_id"):
+            raise ValueError("a valid pending process transition is required")
+        name = await process_service.next_process_name(project_id, predecessor_id)
+        process = await process_service.create_successor(project_id, predecessor_id, name)
+        return {
+            "active_process_id": process["id"],
+            "final_status": "NEW_PROCESS",
+            "context_reload_reason": "new_process",
+            "pending_process_transition": {},
+            "pending_process_summary": {},
+            "process_continuity": {},
+            "expanded_memory_context": {},
+            "memory_expansion_depth": 0,
+            "memory_expansion_exhausted": False,
+        }
 
-    return start_new_process
-
-
-async def start_new_process(state: SupervisorState) -> dict:
-    """Create the successor process after a real strategic pivot.
-
-    Future implementation: use pending_process_transition, create the process
-    through Memory MCP, and preserve a relation such as SUPERSEDES. It must
-    not invent a pivot or use an LLM.
-    """
-    raise RuntimeError("start_new_process requires a ProcessService; use make_start_new_process")
+    return node

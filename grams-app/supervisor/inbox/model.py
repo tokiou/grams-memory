@@ -77,3 +77,4 @@ class SupervisorEvent:
     lease_until: datetime | None = None
     source_run_id: str | None = None
     ingress_id: str | None = None
+    cycle_id: str | None = None
