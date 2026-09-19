@@ -1,4 +1,4 @@
-harbor==0.16.1
+harbor==0.23.0
 fastapi==0.141.1
 uvicorn==0.52.4
 aiosqlite==0.22.1

@@ -3,4 +3,4 @@ services:
     ports:
       - "4096:4096"
     volumes:
-      - "${PWD}/.cache/opencode/1.18.22/linux-x64:/opt/grams-opencode-cache:ro"
+      - "/Users/franciscovega/fran-proyects/grams-memory/.cache/opencode/1.18.22/linux-x64:/opt/grams-opencode-cache:ro"

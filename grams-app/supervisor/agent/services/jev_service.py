@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 import logging
 import os
@@ -41,19 +42,32 @@ class JevClient:
             raise RuntimeError("TYPESAFE_API_KEY is required")
         selected_model = model or self.model
         started = monotonic_ns()
+        request_body = {"model": selected_model, "state": state, "questions": questions}
         emit(logger, logging.INFO, "model_call_started", service="jev", model=selected_model,
              prompt_version="v2", questions=sorted(questions), question_count=len(questions))
         try:
             response = await self._http.post(
                 f"{self.base_url}/systemone",
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={"model": selected_model, "state": state, "questions": questions},
+                json=request_body,
             )
             response.raise_for_status()
             body = response.json()
         except Exception as error:
+            error_fields = {
+                "error": type(error).__name__,
+                "duration_ms": elapsed_ms(started),
+            }
+            if isinstance(error, httpx.HTTPStatusError):
+                response = error.response
+                error_fields.update({
+                    "status_code": response.status_code,
+                    "request_id": response.headers.get("x-typesafe-request-id"),
+                    "response_body": response.text[:4000],
+                    "request_payload_bytes": len(json.dumps(request_body, default=str).encode("utf-8")),
+                })
             emit(logger, logging.ERROR, "model_call_failed", service="jev", model=selected_model,
-                 prompt_version="v2", error=type(error).__name__, duration_ms=elapsed_ms(started))
+                 prompt_version="v2", **error_fields)
             raise
         if not isinstance(body, dict) or not isinstance(body.get("answers"), dict):
             raise RuntimeError("TypeSafe returned an invalid System One response")

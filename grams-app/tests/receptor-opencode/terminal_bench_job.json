@@ -8,10 +8,7 @@
     "type": "docker",
     "delete": true,
     "override_memory_mb": 4096,
-    "extra_allowed_hosts": ["host.docker.internal"],
-    "extra_docker_compose": [
-      "/Users/franciscovega/fran-proyects/grams-memory/grams-app/tests/receptor-opencode/docker-compose-opencode-port.yml"
-    ]
+    "extra_allowed_hosts": ["host.docker.internal"]
   },
   "agents": [
     {
@@ -26,9 +23,9 @@
   ],
   "datasets": [
     {
-      "name": "terminal-bench-sample",
-      "version": "2.0",
-      "task_names": ["regex-log"]
+      "name": "terminal-bench/terminal-bench-2-1",
+      "ref": "latest",
+      "task_names": ["terminal-bench/protein-assembly"]
     }
   ]
 }
