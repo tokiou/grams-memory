@@ -62,8 +62,14 @@ def make_supervision_decision(
     outcome_threshold = outcome_threshold if outcome_threshold is not None else float(
         os.getenv("JEV_OUTCOME_MIN_CONFIDENCE", str(action_threshold))
     )
+    exhausted_intervention_threshold = float(
+        os.getenv("JEV_EXHAUSTED_INTERVENTION_MIN_PROB", "0.75")
+    )
     if not all(0 <= threshold <= 1 for threshold in (
-        action_threshold, context_sufficient_threshold, outcome_threshold,
+        action_threshold,
+        context_sufficient_threshold,
+        outcome_threshold,
+        exhausted_intervention_threshold,
     )):
         raise ValueError("Jev thresholds must be between zero and one")
 
@@ -106,6 +112,12 @@ def make_supervision_decision(
             selected = "NEED_MORE_MEMORY"
         elif action_answer["confidence"] < action_threshold:
             selected = "CONTINUE"
+        if (
+            selected == "NEED_MORE_MEMORY"
+            and int(state.get("memory_expansion_depth", 0)) >= 2
+            and action_answer["probabilities"]["INTERVENE"] > exhausted_intervention_threshold
+        ):
+            selected = "INTERVENE"
         outcome_answer = None
         if selected == "CLOSE_PROCESS":
             outcome_answer = typed_answer(action_answers.get("process_outcome"))

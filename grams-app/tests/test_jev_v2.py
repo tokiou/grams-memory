@@ -113,3 +113,32 @@ def test_close_outcome_is_explicit_and_low_confidence_actions_fall_back_to_conti
         assert result["supervision_decision"]["action"] == "CONTINUE"
 
     asyncio.run(scenario())
+
+
+def test_exhausted_memory_expansion_falls_back_to_high_probability_intervention():
+    async def scenario():
+        diagnostics = {
+            "progress_stall_probability": {"type": "noul", "noul": 0.8},
+            "strategy_supported_probability": {"type": "noul", "noul": 0.2},
+            "context_sufficient_probability": {"type": "noul", "noul": 0.3},
+        }
+        action = {
+            "type": "choice",
+            "choice": "INTERVENE",
+            "probabilities": {
+                "CONTINUE": 0.05,
+                "NEED_MORE_MEMORY": 0.05,
+                "INTERVENE": 0.8,
+                "CLOSE_PROCESS": 0.1,
+            },
+            "confidence": 0.8,
+        }
+        jev = FakeJev([diagnostics, {"action": action}])
+        result = await make_supervision_decision(jev)({
+            "process_context": {},
+            "claimed_events": [],
+            "memory_expansion_depth": 2,
+        })
+        assert result["supervision_decision"]["action"] == "INTERVENE"
+
+    asyncio.run(scenario())
