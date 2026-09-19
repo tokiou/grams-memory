@@ -46,7 +46,7 @@ class OpenCodeClient:
         return result
 
     async def get_context(self, session_id: str) -> dict[str, Any]:
-        messages = await self._request("GET", self._session_path(session_id, "/message"), params={"limit": 20})
+        messages = await self._request("GET", self._session_path(session_id, "/message"), params={"limit": 1000})
         if isinstance(messages, dict) and "data" in messages:
             messages = messages["data"]
         if not isinstance(messages, list):

@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GRAMS v2 | Camino del Supervisor</title>
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --ink: #17211b;
+      --muted: #637068;
+      --line: #c9d0c8;
+      --card: #fffdf8;
+      --python: #dce9df;
+      --jev: #e5def4;
+      --router: #f4dfc7;
+      --mcp: #d8e9ee;
+      --inbox: #ece6d0;
+      --accent: #b84f35;
+      --shadow: 0 14px 32px rgba(30, 43, 34, .08);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--bg); font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap { max-width: 1440px; margin: 0 auto; padding: 38px 24px 70px; }
+    header { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 28px; align-items: end; margin-bottom: 28px; }
+    h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; line-height: 1.1; margin: 0; }
+    h1 { font-size: clamp(2.4rem, 6vw, 5.8rem); letter-spacing: -.055em; max-width: 900px; }
+    h2 { font-size: 2rem; margin-bottom: 12px; }
+    h3 { font-size: 1.25rem; }
+    .kicker { color: var(--accent); font-weight: 750; letter-spacing: .13em; text-transform: uppercase; font-size: .74rem; }
+    .lead { color: var(--muted); font-size: 1.06rem; max-width: 760px; margin: 18px 0 0; }
+    .scope { background: var(--ink); color: #fffdf8; padding: 20px; border-radius: 18px; box-shadow: var(--shadow); }
+    .scope strong { display: block; color: #eab28f; margin-bottom: 8px; }
+    section { margin-top: 46px; }
+    .panel { background: var(--card); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); padding: 22px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 9px; margin: 16px 0 20px; }
+    .tag { display: inline-flex; align-items: center; gap: 7px; border: 1px solid rgba(23,33,27,.14); border-radius: 999px; padding: 5px 10px; font-size: .78rem; font-weight: 700; }
+    .tag i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+    .t-python { background: var(--python); color: #315c3c; }
+    .t-jev { background: var(--jev); color: #624a8a; }
+    .t-router { background: var(--router); color: #92511e; }
+    .t-mcp { background: var(--mcp); color: #286176; }
+    .t-inbox { background: var(--inbox); color: #776523; }
+    .flow { overflow-x: auto; padding: 8px 2px 18px; }
+    .flow-row { display: flex; align-items: stretch; min-width: 1120px; gap: 0; }
+    .node { width: 176px; min-height: 118px; flex: 0 0 176px; padding: 13px; border: 1px solid rgba(23,33,27,.18); border-radius: 14px; position: relative; }
+    .node small { display: block; font: 700 .68rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; opacity: .7; margin-bottom: 8px; }
+    .node b { display: block; font-size: .91rem; line-height: 1.15; }
+    .node span { display: block; color: var(--muted); font-size: .76rem; line-height: 1.25; margin-top: 8px; }
+    .arrow { width: 42px; flex: 0 0 42px; display: grid; place-items: center; color: var(--accent); font-size: 1.35rem; }
+    .decision { margin: 22px auto 0; max-width: 820px; border: 1px dashed var(--accent); border-radius: 16px; padding: 15px; background: #fff8ed; }
+    .decision strong { color: var(--accent); }
+    .branches { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 12px; margin-top: 14px; }
+    .branch { border-top: 4px solid var(--accent); padding: 13px; background: #fffdf8; border-radius: 10px; }
+    .branch b { display: block; margin-bottom: 5px; }
+    .branch p { margin: 0; color: var(--muted); font-size: .85rem; }
+    .route { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 22px; }
+    .route-label { font-family: Georgia, serif; font-size: 1.3rem; padding-top: 12px; }
+    .route-path { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .pill { border-radius: 10px; padding: 9px 11px; border: 1px solid rgba(23,33,27,.15); font-weight: 700; font-size: .82rem; }
+    .pill code { display: block; font-size: .66rem; font-weight: 500; opacity: .72; margin-top: 3px; }
+    .route-arrow { color: var(--accent); font-weight: 800; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+    .node-card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .node-card summary { cursor: pointer; list-style: none; padding: 17px 18px; display: flex; align-items: center; gap: 12px; }
+    .node-card summary::-webkit-details-marker { display: none; }
+    .node-card summary::after { content: "+"; margin-left: auto; font-size: 1.4rem; color: var(--accent); }
+    .node-card[open] summary::after { content: "-"; }
+    .node-card summary b { font-family: Georgia, serif; font-size: 1.2rem; }
+    .node-card summary code { display: block; color: var(--muted); font-size: .72rem; margin-top: 3px; }
+    .node-body { border-top: 1px solid var(--line); padding: 17px 18px 20px; }
+    .node-body p { margin: 0 0 12px; }
+    .node-body ul { margin: 8px 0 0; padding-left: 19px; }
+    .node-body li { margin: 5px 0; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { color: #71452f; }
+    pre { background: #202923; color: #e9eee8; padding: 16px; border-radius: 12px; overflow-x: auto; font-size: .78rem; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    th, td { text-align: left; vertical-align: top; padding: 12px 10px; border-bottom: 1px solid var(--line); }
+    th { font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    td:first-child { font-weight: 750; white-space: nowrap; }
+    td:nth-child(2) { white-space: nowrap; }
+    .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; }
+    .mini h3 { margin-bottom: 9px; }
+    .mini p { color: var(--muted); margin: 0; }
+    .mini ul { padding-left: 18px; margin-bottom: 0; }
+    footer { color: var(--muted); border-top: 1px solid var(--line); margin-top: 55px; padding-top: 18px; font-size: .85rem; }
+    @media (max-width: 850px) { header, .grid, .cols { grid-template-columns: 1fr; } .branches { grid-template-columns: repeat(2, minmax(0, 1fr)); } .route { grid-template-columns: 1fr; gap: 4px; } }
+    @media (max-width: 520px) { .wrap { padding: 25px 14px 50px; } .branches { grid-template-columns: 1fr; } .panel { padding: 16px; } }
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div>
+      <div class="kicker">GRAMS / Supervisor v2</div>
+      <h1>El camino de nodos, explicado sin magia.</h1>
+      <p class="lead">El Supervisor consume eventos durables, carga el proceso actual, usa Jev para decisiones acotadas, OpenRouter para redactar, y Python + Memory MCP para validar, guardar y enrutar.</p>
+    </div>
+    <aside class="scope"><strong>Regla principal</strong>Jev decide. OpenRouter redacta. Python controla. Memory MCP conserva la memoria durable. Inbox conserva los eventos y sus leases.</aside>
+  </header>
+
+  <section>
+    <h2>1. El sistema completo</h2>
+    <div class="panel">
+      <div class="legend">
+        <span class="tag t-python"><i></i>Python / LangGraph</span>
+        <span class="tag t-jev"><i></i>Jev: decisión tipada</span>
+        <span class="tag t-router"><i></i>OpenRouter: generación</span>
+        <span class="tag t-mcp"><i></i>Memory MCP</span>
+        <span class="tag t-inbox"><i></i>Inbox SQLite</span>
+      </div>
+      <div class="flow">
+        <div class="flow-row">
+          <div class="node t-inbox"><small>TRANSPORT</small><b>READ_INBOX</b><span>claim de eventos + lease</span></div><div class="arrow">→</div>
+          <div class="node t-python"><small>LIFECYCLE</small><b>ENSURE_ACTIVE_PROCESS</b><span>Project + proceso activo</span></div><div class="arrow">→</div>
+          <div class="node t-mcp"><small>RETRIEVAL</small><b>LOAD_PROCESS_CONTEXT</b><span>contexto aislado del proceso</span></div><div class="arrow">→</div>
+          <div class="node t-jev"><small>JEV / CHOICE</small><b>ASSESS_PROCESS_CONTINUITY</b><span>SAME o NEW</span></div><div class="arrow">→</div>
+          <div class="node t-router"><small>OPENROUTER / JSON</small><b>EXTRACT_MEMORY_UPDATE</b><span>STRATEGY/EVIDENCE</span></div><div class="arrow">→</div>
+          <div class="node t-mcp"><small>WRITE</small><b>APPLY_MEMORY_UPDATE</b><span>crea y relaciona</span></div><div class="arrow">→</div>
+          <div class="node t-jev"><small>JEV / 2 CALLS</small><b>SUPERVISION_DECISION</b><span>diagnóstico + acción</span></div>
+        </div>
+      </div>
+      <div class="decision"><strong>La decisión de supervisión abre cuatro caminos:</strong><div class="branches">
+        <div class="branch"><b>CONTINUE</b><p>no modifica el proceso; finaliza y hace ACK.</p></div>
+        <div class="branch"><b>NEED_MORE_MEMORY</b><p>expande grafo/páginas y vuelve a Jev.</p></div>
+        <div class="branch"><b>INTERVENE</b><p>redacta, entrega y audita una intervención.</p></div>
+        <div class="branch"><b>CLOSE_PROCESS</b><p>resume, cierra y hace ACK.</p></div>
+      </div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Caminos concretos</h2>
+    <div class="panel">
+      <div class="route"><div class="route-label">Misma estrategia</div><div class="route-path"><span class="pill t-router">EXTRACT_MEMORY_UPDATE<code>extract_memory_update.py</code></span><span class="route-arrow">→</span><span class="pill t-mcp">APPLY_MEMORY_UPDATE<code>apply_memory_update.py</code></span><span class="route-arrow">→</span><span class="pill t-mcp">LOAD_PROCESS_CONTEXT<code>reload: memory_update</code></span><span class="route-arrow">→</span><span class="pill t-jev">SUPERVISION_DECISION<code>supervision_decision.py</code></span></div></div>
+      <div class="route"><div class="route-label">Pivot estratégico</div><div class="route-path"><span class="pill t-router">WRITE_PROCESS_SUMMARY<code>write_process_summary.py</code></span><span class="route-arrow">→</span><span class="pill t-mcp">CLOSE_CURRENT_PROCESS<code>close_current_process.py</code></span><span class="route-arrow">→</span><span class="pill t-python">START_NEW_PROCESS<code>start_new_process.py</code></span><span class="route-arrow">→</span><span class="pill t-mcp">LOAD_PROCESS_CONTEXT<code>reload: new_process</code></span><span class="route-arrow">→</span><span class="pill t-router">EXTRACT_MEMORY_UPDATE</span></div></div>
+      <div class="route"><div class="route-label">Más contexto</div><div class="route-path"><span class="pill t-mcp">EXPAND_GRAPH<code>expand_graph.py</code></span><span class="route-arrow">→</span><span class="pill t-jev">SUPERVISION_DECISION</span><span class="route-arrow">↺</span><span class="pill t-python">FINALIZE</span></div></div>
+      <div class="route"><div class="route-label">Intervención</div><div class="route-path"><span class="pill t-router">BUILD_INTERVENTION<code>build_intervention.py</code></span><span class="route-arrow">→</span><span class="pill t-python">SEND_INTERVENTION<code>send_intervention.py</code></span><span class="route-arrow">→</span><span class="pill t-mcp">RECORD_INTERVENTION<code>record_intervention.py</code></span><span class="route-arrow">→</span><span class="pill t-inbox">FINALIZE / ACK</span></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Qué hace cada nodo</h2>
+    <p class="lead">Abre cada tarjeta. El nombre de la derecha es el script que implementa el nodo.</p>
+    <div class="grid">
+      <details class="node-card" open><summary><span class="tag t-inbox">Inbox</span><div><b>READ_INBOX</b><code>nodes/read_inbox.py</code></div></summary><div class="node-body"><p>Obtiene una cohorte completa de eventos para un <code>root_session_id</code>. El Inbox asigna <code>lease_id</code> y <code>cycle_id</code>, para que el retry conserve identidad.</p><ul><li><strong>Busca:</strong> eventos <code>PENDING</code> o leases expirados en SQLite.</li><li><strong>Guarda:</strong> nada nuevo; devuelve eventos serializables al estado LangGraph.</li><li><strong>Protege:</strong> no mezcla cohorts y no reclama un root con otra cohorte activa.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-python">Python</span><div><b>ENSURE_ACTIVE_PROCESS</b><code>nodes/ensure_active_process.py</code></div></summary><div class="node-body"><p>Resuelve el Project de la sesión y garantiza un proceso activo. También detecta cierres/transiciones incompletos.</p><ul><li><strong>MCP:</strong> <code>ensure_session_project</code>, <code>get_active_process</code>, <code>list_processes</code>, <code>get_process</code>, <code>create_process</code>.</li><li><strong>Guarda:</strong> Project/proceso mediante MCP si faltan.</li><li><strong>Salida:</strong> <code>project_id</code>, <code>active_process_id</code>, flags de recuperación.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-mcp">MCP</span><div><b>LOAD_PROCESS_CONTEXT</b><code>nodes/load_process_context.py</code></div></summary><div class="node-body"><p>Carga una vista compacta y aislada del proceso activo antes de cualquier decisión.</p><ul><li><strong>MCP:</strong> <code>get_process</code>, <code>get_manifest</code>, <code>search</code> por Project/Key/Category, <code>neighbors</code>, <code>list_processes</code>.</li><li><strong>Busca:</strong> categorías <code>STRATEGY</code>, <code>EVIDENCE</code>, <code>SUMMARY</code>, relaciones y procesos predecessor/successor.</li><li><strong>Guarda:</strong> solo en estado transitorio: <code>process_context</code>; la fuente durable sigue siendo MCP.</li><li><strong>Control:</strong> máximo 50 por categoría y metadata de paginación.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-jev">Jev</span><div><b>ASSESS_PROCESS_CONTINUITY</b><code>nodes/assess_process_continuity.py</code></div></summary><div class="node-body"><p>Pregunta si la ejecución continúa la misma estrategia o representa un pivot material.</p><ul><li><strong>Pregunta:</strong> <code>choice</code> con <code>SAME_PROCESS</code> y <code>NEW_PROCESS</code>.</li><li><strong>Guarda:</strong> decisión, distribución completa y confidence en <code>process_continuity</code>.</li><li><strong>Regla Python:</strong> <code>JEV_NEW_PROCESS_MIN_PROB</code> determina el corte.</li><li><strong>No hace:</strong> no inventa nombres ni escribe MCP.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-router">OpenRouter</span><div><b>EXTRACT_MEMORY_UPDATE</b><code>nodes/extract_memory_update.py</code></div></summary><div class="node-body"><p>Propone conocimiento durable de alto valor, no decide routing.</p><ul><li><strong>Genera:</strong> JSON con memorias <code>STRATEGY</code>/<code>EVIDENCE</code> y relaciones allowlist.</li><li><strong>Refs:</strong> <code>new_1</code>, <code>new_2</code>, etc.</li><li><strong>Guarda:</strong> solo propuesta validada en el estado; todavía no MCP.</li><li><strong>Prompt:</strong> <code>MEMORY_UPDATE_SYSTEM_PROMPT</code> en <code>agent/prompts.py</code>.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-mcp">MCP</span><div><b>APPLY_MEMORY_UPDATE</b><code>nodes/apply_memory_update.py</code></div></summary><div class="node-body"><p>Convierte la propuesta de OpenRouter en escrituras deterministas y reconciliables.</p><ul><li><strong>Busca:</strong> memorias actuales del proceso y relaciones existentes.</li><li><strong>Guarda:</strong> <code>memory_create</code> con category ID y source <code>supervisor</code>; <code>memory_link</code> para relaciones.</li><li><strong>Idempotencia:</strong> deduplica por categoría/título/contenido y etiqueta con <code>cycle_id:candidate_ref</code>.</li><li><strong>Valida:</strong> scope, categorías, refs locales, self-relations y relaciones duplicadas.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-jev">Jev</span><div><b>SUPERVISION_DECISION</b><code>nodes/supervision_decision.py</code></div></summary><div class="node-body"><p>Es el centro de decisión. Hace dos llamadas Jev independientes.</p><ul><li><strong>Call 1:</strong> tres <code>noul</code>: progress stall, strategy supported, context sufficient.</li><li><strong>Call 2:</strong> <code>choice</code>: CONTINUE, NEED_MORE_MEMORY, INTERVENE, CLOSE_PROCESS; además clasifica outcome terminal.</li><li><strong>Guarda:</strong> diagnósticos, probabilidades, confidence, acción y targets MCP.</li><li><strong>Reglas Python:</strong> context insuficiente fuerza expansión; baja confidence fuerza CONTINUE; outcome bajo fuerza no cerrar.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-mcp">MCP</span><div><b>EXPAND_GRAPH</b><code>nodes/expand_graph.py</code></div></summary><div class="node-body"><p>Amplía contexto únicamente cuando Jev pide más memoria.</p><ul><li><strong>MCP:</strong> <code>get</code>, <code>neighbors</code>, <code>search(offset)</code>, <code>list_processes</code> y <code>load_process_context</code> para procesos relacionados.</li><li><strong>Busca:</strong> IDs dentro del proceso, relaciones permitidas, summaries y páginas antiguas.</li><li><strong>Guarda:</strong> <code>expanded_memory_context</code> transitorio; nunca reemplaza el contexto normal.</li><li><strong>Control:</strong> <code>memory_expansion_depth</code> y <code>max_expansion_depth</code> evitan loops.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-router">OpenRouter</span><div><b>WRITE_PROCESS_SUMMARY</b><code>nodes/write_process_summary.py</code></div></summary><div class="node-body"><p>Comprime el proceso al cerrarlo.</p><ul><li><strong>Genera:</strong> resumen compacto de estrategia, evidencia, outcome y lecciones reutilizables.</li><li><strong>Guarda:</strong> solo <code>pending_process_summary</code> validado en estado.</li><li><strong>Después:</strong> el nodo MCP siguiente persiste el SUMMARY y cierra el proceso.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-mcp">MCP</span><div><b>CLOSE_CURRENT_PROCESS</b><code>nodes/close_current_process.py</code></div></summary><div class="node-body"><p>Persiste el summary y cambia el proceso de ACTIVE a outcome terminal.</p><ul><li><strong>Busca:</strong> summaries por <code>cycle_id</code> para evitar duplicados.</li><li><strong>Guarda:</strong> <code>memory_create</code> en categoría SUMMARY y <code>close_process</code> con SUCCEEDED/FAILED/ABANDONED.</li><li><strong>Recuperación:</strong> si el summary ya existe, lo reutiliza; ProcessService puede reanudar cierre incompleto.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-python">Python + MCP</span><div><b>START_NEW_PROCESS</b><code>nodes/start_new_process.py</code></div></summary><div class="node-body"><p>Crea el sucesor después de un pivot decidido por continuidad.</p><ul><li><strong>Busca:</strong> máximo nombre existente y sucesor ya creado.</li><li><strong>Guarda:</strong> <code>create_process</code> con nombre determinista, por ejemplo <code>process_002</code>, y <code>predecessor_id</code>.</li><li><strong>Limpia:</strong> transición pendiente, summary y expansión; fuerza reload del nuevo proceso.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-router">OpenRouter</span><div><b>BUILD_INTERVENTION</b><code>nodes/build_intervention.py</code></div></summary><div class="node-body"><p>Redacta un mensaje después de que Jev ya eligió INTERVENE.</p><ul><li><strong>Genera:</strong> texto breve, accionable y basado en evidencia.</li><li><strong>Guarda:</strong> texto en <code>intervention_message</code>; no modifica MCP.</li><li><strong>Restricción:</strong> no decide si intervenir ni resuelve la tarea.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-python">Python + OpenCode</span><div><b>SEND_INTERVENTION</b><code>nodes/send_intervention.py</code></div></summary><div class="node-body"><p>Entrega el mensaje al Action Agent con una intención durable.</p><ul><li><strong>Busca:</strong> evidencia auditora por <code>cycle_id</code>.</li><li><strong>Guarda:</strong> estados PREPARED, SENDING, DELIVERY_UNKNOWN o DELIVERED en una memoria de evidencia.</li><li><strong>Entrega:</strong> <code>OpenCodeClient.send_message</code> a la sesión raíz.</li><li><strong>Seguridad:</strong> el texto persistido es canónico; una regeneración no lo reemplaza.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-mcp">MCP</span><div><b>RECORD_INTERVENTION</b><code>nodes/record_intervention.py</code></div></summary><div class="node-body"><p>Compatibilidad/auditoría final de la intervención.</p><ul><li><strong>Guarda:</strong> evidencia en categoría EVIDENCE si SEND aún no dejó auditoría.</li><li><strong>Idempotencia:</strong> si existe <code>audit_memory_id</code>, no crea otra memoria.</li></ul></div></details>
+      <details class="node-card"><summary><span class="tag t-inbox">Inbox</span><div><b>FINALIZE</b><code>nodes/finalize_cycle.py</code></div></summary><div class="node-body"><p>Cierra el ciclo durable, no el proceso semántico.</p><ul><li><strong>Guarda:</strong> ACK atómico de todos los pares <code>(event_id, lease_id)</code>.</li><li><strong>Si falla:</strong> el runtime ejecuta <code>fail_batch</code> y reencola la cohorte completa.</li><li><strong>Limpia:</strong> estado transitorio de LangGraph para la siguiente ejecución.</li></ul></div></details>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Qué se guarda y dónde</h2>
+    <div class="cols">
+      <div class="panel mini"><h3>Inbox SQLite</h3><p>Fuente durable de ejecución.</p><ul><li>payload/evento original</li><li>status PENDING/PROCESSING/PROCESSED/FAILED</li><li>lease, retry_count, cycle_id</li><li>objetivo original por sesión</li><li>ACK/fail de cohortes</li></ul></div>
+      <div class="panel mini"><h3>Memory MCP</h3><p>Fuente durable semántica.</p><ul><li>Project y Process lifecycle</li><li>STRATEGY</li><li>EVIDENCE</li><li>SUMMARY</li><li>relations y predecessor</li><li>auditoría de intervenciones</li></ul></div>
+      <div class="panel mini"><h3>LangGraph state</h3><p>Solo coordinación temporal.</p><ul><li>claimed events</li><li>context actual</li><li>propuestas y decisiones</li><li>expanded context</li><li>mensajes pendientes</li><li>resultados para el siguiente nodo</li></ul></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Estado que recibe Jev</h2>
+    <div class="panel"><p>Se construye con <code>build_jev_process_state</code> en <code>agent/state_builder.py</code>. No se envían timeout, deadline ni presupuesto de benchmark.</p><pre>{
+  "task": { "objective": "...", "global_constraints": [] },
+  "current_process": { "id": "p1", "name": "process_001", "status": "ACTIVE" },
+  "strategy": [],
+  "evidence": [],
+  "relations": [],
+  "recent_execution": [],
+  "operational_metrics": {
+    "recent_event_count": 20,
+    "recent_tool_call_count": 9,
+    "recent_validation_count": 2,
+    "recent_error_count": 0,
+    "context_truncated": false
+  },
+  "expanded_memory": null
+}</pre></div>
+  </section>
+
+  <section>
+    <h2>6. Los tres límites de modelos</h2>
+    <div class="table-wrap panel"><table><thead><tr><th>Componente</th><th>Puede hacer</th><th>No puede hacer</th><th>Script</th></tr></thead><tbody>
+      <tr><td>Jev</td><td>Choice/Noul tipados, probabilidades, confidence.</td><td>Escribir MCP, enviar mensajes, ACK, inventar nombres.</td><td><code>services/jev_service.py</code> + nodos Jev</td></tr>
+      <tr><td>OpenRouter</td><td>JSON de memorias, summary y texto de intervención.</td><td>Elegir ruta, llamar herramientas, escribir MCP, decidir intervenir.</td><td><code>services/openrouter_service.py</code> + nodos generativos</td></tr>
+      <tr><td>Python/MCP</td><td>Validar, enrutar, deduplicar, persistir, cerrar procesos, leases y ACK.</td><td>Delegar decisiones de control a texto libre.</td><td><code>agent/graph.py</code>, <code>nodes/</code>, clientes MCP/Inbox</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section>
+    <h2>7. Archivos de referencia</h2>
+    <div class="panel"><ul><li><code>grams-app/supervisor/agent/graph.py</code> define el wiring y las rutas.</li><li><code>grams-app/supervisor/agent/runtime.py</code> reclama cohortes, heartbeat, objetivo durable y fail.</li><li><code>grams-app/supervisor/agent/worker.py</code> descubre roots y ejecuta ciclos.</li><li><code>grams-app/supervisor/agent/state.py</code> define el estado LangGraph.</li><li><code>grams-app/supervisor/agent/prompts.py</code> contiene prompts e instrucciones versionadas.</li><li><code>grams-app/supervisor/agent/schemas.py</code> valida respuestas y propuestas.</li><li><code>grams-app/supervisor/inbox/</code> implementa durabilidad, cohortes, leases y ACK.</li><li><code>grams-app/supervisor/memory/client.py</code> traduce operaciones Python a herramientas Memory MCP.</li><li><code>docs/v2/JEV_OPENROUTER.md</code> contiene el contrato funcional.</li></ul></div>
+  </section>
+
+  <footer>GRAMS v2 · Documento generado para revisión del flujo actual · La fuente de verdad de comportamiento sigue siendo el código y <code>docs/v2/JEV_OPENROUTER.md</code>.</footer>
+</main>
+</body>
+</html>

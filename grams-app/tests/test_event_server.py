@@ -75,3 +75,14 @@ def test_unsupported_routes_and_methods_are_rejected():
         assert client.post("/missing", json={}).status_code == 404
         assert client.get("/events").status_code == 405
         assert client.post("/events/", json={}).status_code == 404
+
+
+def test_lifespan_starts_explicit_supervisor_worker_when_enabled():
+    temporary_directory = tempfile.TemporaryDirectory()
+    config = Config(
+        Path(temporary_directory.name) / "supervisor.db",
+        worker_enabled=True,
+        worker_poll_seconds=0.01,
+    )
+    with temporary_directory, TestClient(create_app(config)) as client:
+        assert client.app.state.worker is not None

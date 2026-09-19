@@ -1,4 +1,8 @@
 import asyncio
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from supervisor.agent.nodes.load_process_context import make_load_process_context
 
@@ -33,7 +37,20 @@ class FakeMemory:
     async def search(self, query="", **filters):
         return [{
             "id": filters["category_id"],
+            "category_id": filters["category_id"],
             "updated_at": "2026-09-17T12:00:00+00:00",
+        }]
+
+    async def neighbors(self, memory_id, **filters):
+        return {"nodes": [], "edges": []}
+
+    async def list_processes(self, project_id):
+        return [{
+            "id": "process-1",
+            "project_id": project_id,
+            "key_id": "key-1",
+            "name": "process_001",
+            "status": "ACTIVE",
         }]
 
 
