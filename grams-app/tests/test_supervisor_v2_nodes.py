@@ -537,10 +537,6 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
             def __init__(self):
                 self.calls = []
 
-            async def abort_session(self, session_id):
-                self.calls.append(("abort", session_id))
-                return None
-
             async def send_message(self, session_id, message):
                 self.calls.append(("send", session_id, message))
                 assert session_id == "session-1"
@@ -575,11 +571,7 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
         state.update(await make_send_intervention(opencode, memory)(state))
         state.update(await make_record_intervention(memory)(state))
         assert state["intervention_result"]["audit_memory_id"] == "audit-1"
-        assert state["intervention_result"]["abort_status"] == "CONFIRMED"
-        assert opencode.calls == [
-            ("abort", "session-1"),
-            ("send", "session-1", "Run the focused validation."),
-        ]
+        assert opencode.calls == [("send", "session-1", "Run the focused validation.")]
 
     asyncio.run(scenario())
 
