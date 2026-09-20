@@ -20,7 +20,10 @@ from supervisor.agent.nodes.supervision_decision import make_supervision_decisio
 from supervisor.agent.graph import build_graph
 from supervisor.agent.runtime import SupervisorRuntime
 from supervisor.agent.services.openrouter_service import OpenRouterClient
+from supervisor.agent.schemas import validate_memory_proposal, validate_summary
 from supervisor.agent.state_builder import build_jev_process_state
+from supervisor.agent.state_builder import compact_jev_state, estimate_json_tokens
+from supervisor.agent.services.jev_service import JevClient
 
 
 class FakeJev:
@@ -69,6 +72,8 @@ def test_openrouter_uses_json_serialization_and_json_schema_response_format():
         assert value == {"content": "summary"}
         assert text == "plain text"
         assert requests[0]["messages"][1]["content"] == '{"a": 1, "b": 2}'
+        assert requests[0]["max_tokens"] == 4096
+        assert requests[0]["reasoning"] == {"enabled": False}
         assert requests[0]["response_format"] == {
             "type": "json_schema",
             "json_schema": {
@@ -78,8 +83,69 @@ def test_openrouter_uses_json_serialization_and_json_schema_response_format():
             },
         }
         assert "response_format" not in requests[1]
+        assert requests[1]["max_tokens"] == 512
+        assert requests[1]["reasoning"] == {"enabled": False}
 
     asyncio.run(scenario())
+
+
+def test_openrouter_chat_applies_a_default_cap_and_rejects_oversized_caps():
+    async def scenario():
+        requests = []
+
+        def handler(request):
+            requests.append(json.loads(request.content))
+            return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = OpenRouterClient(api_key="test-key", model="test-model", http=http)
+        await client.chat([{"role": "user", "content": "x"}])
+        with pytest.raises(ValueError, match="max_tokens"):
+            await client.chat([{"role": "user", "content": "x"}], max_tokens=4097)
+        await http.aclose()
+
+        assert requests[0]["max_tokens"] == 4096
+        assert requests[0]["reasoning"] == {"enabled": False}
+
+    asyncio.run(scenario())
+
+
+def test_openrouter_rejects_length_truncated_responses():
+    async def scenario():
+        def handler(request):
+            return httpx.Response(200, json={
+                "choices": [{"finish_reason": "length", "message": {"content": "{"}}],
+            })
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = OpenRouterClient(api_key="test-key", model="test-model", http=http)
+        with pytest.raises(RuntimeError, match="truncated by max_tokens"):
+            await client.generate_json(
+                operation="EXTRACT_MEMORY_UPDATE",
+                payload={},
+                system_prompt="system",
+                schema={"type": "object"},
+            )
+        await http.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_memory_and_summary_validators_enforce_output_bounds():
+    candidate = {"category": "EVIDENCE", "title": "title", "content": "content", "candidate_ref": "new_1"}
+    with pytest.raises(ValueError, match="more than 6 memories"):
+        validate_memory_proposal({"memories": [{**candidate, "candidate_ref": f"new_{i}"} for i in range(1, 8)], "relations": []})
+    with pytest.raises(ValueError, match="titles cannot exceed"):
+        validate_memory_proposal({"memories": [{**candidate, "title": "x" * 201}], "relations": []})
+    with pytest.raises(ValueError, match="content cannot exceed"):
+        validate_memory_proposal({"memories": [{**candidate, "content": "x" * 1201}], "relations": []})
+    with pytest.raises(ValueError, match="more than 12 relations"):
+        validate_memory_proposal({
+            "memories": [candidate],
+            "relations": [{"source_id": "new_1", "relation_type": "SUPPORTS", "target_id": f"m{i}"} for i in range(13)],
+        })
+    with pytest.raises(ValueError, match="summary content cannot exceed"):
+        validate_summary({"content": "x" * 4001, "outcome": "FAILED"})
 
 
 def test_state_builder_normalizes_nested_plugin_payload_and_excludes_budgets():
@@ -169,6 +235,106 @@ def test_state_builder_normalizes_real_go_subgraph_fields():
         "nodes": [{"id": "m2", "category_id": "e1", "content": "older evidence"}],
         "edges": [{"source_id": "m1", "target_id": "m2", "relation": "SUPPORTS"}],
     }
+
+
+def test_jev_state_compaction_is_deterministic_and_marks_omissions():
+    state = {
+        "task": {"objective": "solve"},
+        "current_process": {"id": "p1"},
+        "recent_execution": [{"id": str(index), "result": "x" * 100} for index in range(5)],
+        "expanded_memory": {"subgraphs": {str(index): {"nodes": [{"id": str(index)}]} for index in range(5)}},
+    }
+    first = compact_jev_state(state, max_tokens=250)
+    second = compact_jev_state(state, max_tokens=250)
+    assert first == second
+    assert first["context_compaction"]["truncated"] is True
+    assert first["context_compaction"]["omitted_items"]
+    assert json.dumps(first, separators=(",", ":"))
+
+
+def test_jev_client_compacts_before_posting():
+    async def scenario():
+        requests = []
+
+        def handler(request):
+            requests.append(json.loads(request.content))
+            return httpx.Response(200, json={"answers": {}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=1200)
+        await client.system_one(
+            state={"recent_execution": [{"id": str(index), "result": "x" * 100} for index in range(10)]},
+            questions={"decision": {"type": "noul", "instructions": "ok"}},
+        )
+        await http.aclose()
+        body = requests[0]
+        assert body["state"]["context_compaction"]["truncated"] is True
+        assert estimate_json_tokens(body) <= 1200
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_budgets_the_complete_compact_request_with_unicode_and_questions():
+    async def scenario():
+        requests = []
+
+        def handler(request):
+            requests.append(request.content)
+            return httpx.Response(200, json={"answers": {}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=900)
+        state = {
+            "task": {"objective": "áéíóú 日本語 🚀"},
+            "recent_execution": [{"id": str(index), "result": "x" * 200} for index in range(10)],
+        }
+        questions = {
+            "diagnostic": {"type": "noul", "instructions": "Decide whether context is sufficient."},
+            "continuity": {"type": "choice", "criteria": {"SAME_PROCESS": "same", "NEW_PROCESS": "new"}},
+        }
+        await client.system_one(state=state, questions=questions)
+        await http.aclose()
+
+        assert len(requests) == 1
+        assert len(requests[0]) <= 900
+        assert b"  " not in requests[0]
+        assert json.loads(requests[0])["state"]["context_compaction"]["truncated"] is True
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_rejects_questions_that_leave_no_request_budget():
+    async def scenario():
+        calls = 0
+
+        def handler(request):
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, json={"answers": {}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=100)
+        with pytest.raises(ValueError, match="request byte limit"):
+            await client.system_one(
+                state={"task": {"objective": "solve"}},
+                questions={"decision": {"type": "noul", "instructions": "x" * 200}},
+            )
+        await http.aclose()
+        assert calls == 0
+
+    asyncio.run(scenario())
+
+
+def test_expansion_depth_has_a_hard_three_round_limit():
+    with pytest.raises(ValueError, match="cannot exceed 3"):
+        make_expand_graph(object(), max_depth=4)
+
+    async def scenario():
+        node = make_expand_graph(object())
+        with pytest.raises(ValueError, match="integer from zero to three"):
+            await node({"memory_expansion_depth": -1})
+
+    asyncio.run(scenario())
 
 
 def test_supervision_need_more_memory_has_python_targets_and_preserves_answers():
@@ -368,7 +534,11 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
                 return "Run the focused validation."
 
         class OpenCode:
+            def __init__(self):
+                self.calls = []
+
             async def send_message(self, session_id, message):
+                self.calls.append(("send", session_id, message))
                 assert session_id == "session-1"
                 return {"accepted": True}
 
@@ -397,9 +567,11 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
         }
         state.update(await make_build_intervention(Generator())(state))
         memory = Memory()
-        state.update(await make_send_intervention(OpenCode(), memory)(state))
+        opencode = OpenCode()
+        state.update(await make_send_intervention(opencode, memory)(state))
         state.update(await make_record_intervention(memory)(state))
         assert state["intervention_result"]["audit_memory_id"] == "audit-1"
+        assert opencode.calls == [("send", "session-1", "Run the focused validation.")]
 
     asyncio.run(scenario())
 

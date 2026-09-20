@@ -31,9 +31,11 @@ def build_graph(
     process_service=None,
     batch_size=20,
     run_id=None,
-    max_expansion_depth=2,
+    max_expansion_depth=3,
     checkpointer=None,
 ):
+    if max_expansion_depth > 3:
+        raise ValueError("max_expansion_depth cannot exceed 3")
     if jev is None:
         raise ValueError("build_graph requires a Jev client")
     if openrouter is None:

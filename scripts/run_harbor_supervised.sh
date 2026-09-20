@@ -18,15 +18,25 @@ fi
 
 harbor_args=()
 while (($#)); do
-  if [[ "$1" == "--timeout-multiplier" ]]; then
-    shift 2
-    continue
-  fi
-  harbor_args+=("$1")
-  shift
+  case "$1" in
+    --timeout-multiplier)
+      if (($# < 2)); then
+        printf '%s\n' '--timeout-multiplier requires a value' >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --timeout-multiplier=*)
+      shift
+      ;;
+    *)
+      harbor_args+=("$1")
+      shift
+      ;;
+  esac
 done
 
 exec docker compose exec -T grams-opencode harbor run \
   "${harbor_args[@]}" \
-  --timeout-multiplier "${HARBOR_TIMEOUT_MULTIPLIER:-1.0}" \
+  --timeout-multiplier 1.0 \
   --extra-docker-compose "$port_overlay"

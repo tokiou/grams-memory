@@ -84,11 +84,20 @@ RELATION_TYPES = {
     "FAILED_BECAUSE", "BLOCKED_BY", "DEPENDS_ON", "SUPERSEDES", "VALIDATES",
 }
 TERMINAL_OUTCOMES = {"SUCCEEDED", "FAILED", "SUPERSEDED", "ABANDONED"}
+MAX_MEMORY_CANDIDATES = 6
+MAX_MEMORY_TITLE_LENGTH = 200
+MAX_MEMORY_CONTENT_LENGTH = 1200
+MAX_RELATION_CANDIDATES = 12
+MAX_SUMMARY_LENGTH = 4000
 
 
 def validate_memory_proposal(value: Any) -> MemoryUpdateProposal:
     if not isinstance(value, dict) or not isinstance(value.get("memories"), list) or not isinstance(value.get("relations"), list):
         raise ValueError("memory update must contain memories and relations lists")
+    if len(value["memories"]) > MAX_MEMORY_CANDIDATES:
+        raise ValueError(f"memory update cannot contain more than {MAX_MEMORY_CANDIDATES} memories")
+    if len(value["relations"]) > MAX_RELATION_CANDIDATES:
+        raise ValueError(f"memory update cannot contain more than {MAX_RELATION_CANDIDATES} relations")
     refs: set[str] = set()
     memories = []
     for index, item in enumerate(value["memories"], start=1):
@@ -96,6 +105,10 @@ def validate_memory_proposal(value: Any) -> MemoryUpdateProposal:
             raise ValueError("memory candidates must be STRATEGY or EVIDENCE")
         if not all(isinstance(item.get(k), str) and item[k].strip() for k in ("title", "content")):
             raise ValueError("memory candidates require non-empty title and content")
+        if len(item["title"].strip()) > MAX_MEMORY_TITLE_LENGTH:
+            raise ValueError(f"memory candidate titles cannot exceed {MAX_MEMORY_TITLE_LENGTH} characters")
+        if len(item["content"].strip()) > MAX_MEMORY_CONTENT_LENGTH:
+            raise ValueError(f"memory candidate content cannot exceed {MAX_MEMORY_CONTENT_LENGTH} characters")
         ref = item.get("candidate_ref")
         if ref != f"new_{index}" or ref in refs:
             raise ValueError("candidate_ref values must be unique sequential new_N references")
@@ -171,6 +184,8 @@ def validate_supervision_decision(value: Any) -> SupervisionDecision:
 def validate_summary(value: Any) -> ProcessSummary:
     if not isinstance(value, dict) or not isinstance(value.get("content"), str) or not value["content"].strip() or value.get("outcome") not in TERMINAL_OUTCOMES:
         raise ValueError("summary requires non-empty content and terminal outcome")
+    if len(value["content"].strip()) > MAX_SUMMARY_LENGTH:
+        raise ValueError(f"summary content cannot exceed {MAX_SUMMARY_LENGTH} characters")
     return {"content": value["content"].strip(), "outcome": value["outcome"]}
 
 

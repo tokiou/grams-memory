@@ -141,7 +141,7 @@ The standard long-running evaluation profile is:
 - Docker trial CPU: `4` CPUs;
 - Docker trial memory: `8192 MB`;
 - Harbor concurrency: `1` trial;
-- timeout multiplier: `2.0`;
+- timeout multiplier: `1.0`;
 - receiver: host `uvicorn`, port `8765`.
 
 Use the repository wrapper for supervised Harbor trials. Do not launch another
