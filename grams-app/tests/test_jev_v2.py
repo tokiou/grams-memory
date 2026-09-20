@@ -137,7 +137,7 @@ def test_exhausted_memory_expansion_falls_back_to_high_probability_intervention(
         result = await make_supervision_decision(jev)({
             "process_context": {},
             "claimed_events": [],
-            "memory_expansion_depth": 2,
+            "memory_expansion_depth": 3,
         })
         assert result["supervision_decision"]["action"] == "INTERVENE"
 

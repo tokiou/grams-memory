@@ -114,7 +114,7 @@ def make_supervision_decision(
             selected = "CONTINUE"
         if (
             selected == "NEED_MORE_MEMORY"
-            and int(state.get("memory_expansion_depth", 0)) >= 2
+            and int(state.get("memory_expansion_depth", 0)) >= 3
             and action_answer["probabilities"]["INTERVENE"] > exhausted_intervention_threshold
         ):
             selected = "INTERVENE"

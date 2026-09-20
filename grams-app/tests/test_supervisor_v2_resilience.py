@@ -4,11 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 import sys
 
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from supervisor.agent.nodes.send_intervention import make_send_intervention
+from supervisor.agent.nodes.record_intervention import make_record_intervention
 from supervisor.agent.nodes.common import cycle_key
 from supervisor.agent.nodes.expand_graph import make_expand_graph
 from supervisor.agent.runtime import SupervisorRuntime
@@ -127,6 +129,10 @@ def test_intervention_retry_reconciles_ambiguous_delivery_without_resending():
         class OpenCode:
             def __init__(self):
                 self.messages = []
+                self.aborts = []
+
+            async def abort_session(self, session_id):
+                self.aborts.append(session_id)
 
             async def send_message(self, session_id, message):
                 self.messages.append(message)
@@ -149,7 +155,9 @@ def test_intervention_retry_reconciles_ambiguous_delivery_without_resending():
         retry_state = {**state, "intervention_message": "A newly generated message."}
         result = await node(retry_state)
         assert len(opencode.messages) == 1
+        assert opencode.aborts == ["root"]
         assert result["intervention_result"]["delivered"] is True
+        assert result["intervention_result"]["abort_status"] == "CONFIRMED"
         assert result["intervention_result"]["message"] == "Reconsider the failed strategy."
         assert memory.record["content"].startswith("DELIVERED\n")
         assert "newly generated" not in memory.record["content"]
@@ -177,6 +185,10 @@ def test_ambiguous_invisible_intervention_is_not_resent():
         class OpenCode:
             def __init__(self):
                 self.send_count = 0
+                self.abort_count = 0
+
+            async def abort_session(self, session_id):
+                self.abort_count += 1
 
             async def send_message(self, session_id, message):
                 self.send_count += 1
@@ -198,8 +210,116 @@ def test_ambiguous_invisible_intervention_is_not_resent():
             await node(state)
         result = await node(state)
         assert opencode.send_count == 1
+        assert opencode.abort_count == 1
         assert result["intervention_result"]["delivery_status"] == "UNKNOWN"
+        assert result["intervention_result"]["abort_status"] == "CONFIRMED"
         assert memory.record["content"].startswith("DELIVERY_UNKNOWN\n")
+
+    asyncio.run(scenario())
+
+
+def test_failed_abort_does_not_send_intervention():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.record = None
+
+            async def search(self, **kwargs):
+                return [self.record] if self.record else []
+
+            async def create(self, value):
+                self.record = {"id": "audit-1", **value}
+                return self.record
+
+            async def update(self, memory_id, value):
+                self.record.update(value)
+                return self.record
+
+        class OpenCode:
+            def __init__(self):
+                self.send_count = 0
+
+            async def abort_session(self, session_id):
+                raise RuntimeError("abort failed")
+
+            async def send_message(self, session_id, message):
+                self.send_count += 1
+                raise AssertionError("prompt must not be sent after a failed abort")
+
+        state = {
+            "root_session_id": "root",
+            "claimed_events": [{"id": "event-1", "lease_id": "lease-1"}],
+            "intervention_message": "Stop investigating and implement now.",
+            "process_context": {"key": {"evidence_category_id": "evidence"}},
+        }
+        memory = Memory()
+        opencode = OpenCode()
+        with pytest.raises(RuntimeError, match="abort failed"):
+            await make_send_intervention(opencode, memory)(state)
+        assert opencode.send_count == 0
+        assert memory.record["content"].startswith("ABORT_UNKNOWN\n")
+
+    asyncio.run(scenario())
+
+
+def test_rejected_prompt_is_durable_and_not_reclassified_as_unknown():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.record = None
+
+            async def search(self, **kwargs):
+                return [self.record] if self.record else []
+
+            async def create(self, value):
+                self.record = {"id": "audit-1", **value}
+                return self.record
+
+            async def update(self, memory_id, value):
+                self.record.update(value)
+                return self.record
+
+        class OpenCode:
+            async def abort_session(self, session_id):
+                return None
+
+            async def send_message(self, session_id, message):
+                request = httpx.Request("POST", "http://opencode/prompt_async")
+                response = httpx.Response(500, request=request)
+                raise httpx.HTTPStatusError("prompt rejected", request=request, response=response)
+
+        state = {
+            "root_session_id": "root",
+            "claimed_events": [{"id": "event-1", "lease_id": "lease-1"}],
+            "intervention_message": "Implement now.",
+            "process_context": {"key": {"evidence_category_id": "evidence"}},
+        }
+        memory = Memory()
+        node = make_send_intervention(OpenCode(), memory)
+        with pytest.raises(httpx.HTTPStatusError, match="prompt rejected"):
+            await node(state)
+        assert memory.record["content"] == "PROMPT_FAILED\nImplement now."
+        with pytest.raises(RuntimeError, match="prompt failed"):
+            await node(state)
+
+    asyncio.run(scenario())
+
+
+def test_unknown_intervention_cannot_be_recorded_or_acked():
+    async def scenario():
+        class Memory:
+            async def create(self, value):
+                raise AssertionError("unknown intervention must not be recorded")
+
+        state = {
+            "intervention_result": {
+                "delivered": False,
+                "message": "Implement now.",
+            },
+            "process_context": {"key": {"evidence_category_id": "evidence"}},
+        }
+        with pytest.raises(RuntimeError, match="was not delivered"):
+            await make_record_intervention(Memory())(state)
 
     asyncio.run(scenario())
 

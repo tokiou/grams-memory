@@ -27,6 +27,10 @@ class GramsOpenCode(OpenCode):
     def name() -> str:
         return "grams-opencode"
 
+    def _error_messages(self) -> list[str]:
+        # A supervisor abort is an intentional control action, not an agent failure.
+        return [message for message in super()._error_messages() if message.strip().casefold() != "aborted"]
+
     @staticmethod
     def _plugin_source() -> str:
         return (
@@ -42,11 +46,16 @@ class GramsOpenCode(OpenCode):
 set -u
 
 real="$HOME/.opencode/bin/opencode-real"
+server_log=/logs/agent/opencode-server.log
+wrapper_log=/logs/agent/opencode-wrapper.log
+run_output=/logs/agent/opencode-run.jsonl
+mkdir -p /logs/agent
 if [[ "${1:-}" == "--version" ]]; then
   exec "$real" "$@"
 fi
 
-"$real" serve --hostname 0.0.0.0 --port 4096 >/tmp/grams-opencode-server.log 2>&1 &
+printf 'Starting OpenCode server on port 4096\\n' >"$wrapper_log"
+"$real" serve --hostname 0.0.0.0 --port 4096 >"$server_log" 2>&1 &
 server_pid=$!
 ready=0
 for _ in $(seq 1 120); do
@@ -58,9 +67,12 @@ for _ in $(seq 1 120); do
   sleep 0.1
 done
 if [[ "$ready" != "1" ]]; then
+  printf 'OpenCode server failed health check after 12 seconds\\n' >>"$wrapper_log"
+  curl --max-time 2 -v http://127.0.0.1:4096/global/health >>"$wrapper_log" 2>&1 || true
   kill "$server_pid" 2>/dev/null || true
   exit 1
 fi
+printf 'OpenCode server health check passed\\n' >>"$wrapper_log"
 
 args=()
 attached=0
@@ -73,8 +85,15 @@ for arg in "$@"; do
 done
 
 trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-"$real" "${args[@]}"
-status=$?
+"$real" "${args[@]}" 2>&1 | tee "$run_output"
+status=${PIPESTATUS[0]}
+if [[ -n "${GRAMS_EVENT_ENDPOINT:-}" ]]; then
+  # The plugin can receive session.error after the CLI stream has ended. Keep
+  # the API alive long enough for the Supervisor's follow-up prompt to arrive.
+  sleep "${GRAMS_FOLLOW_UP_GRACE_SECONDS:-90}"
+fi
+kill "$server_pid" 2>/dev/null || true
+trap - EXIT
 exit "$status"
 '''
 
@@ -85,11 +104,11 @@ exit "$status"
             env={"DEBIAN_FRONTEND": "noninteractive"},
         )
 
-        plugin = base64.b64encode(self._plugin_source().encode()).decode()
         wrapper = base64.b64encode(self._opencode_wrapper().encode()).decode()
         endpoint = os.environ.get("GRAMS_EVENT_ENDPOINT", self.EVENT_ENDPOINT)
         path_line = 'export PATH="$HOME/.opencode/bin:$PATH"'
         endpoint_line = f"export GRAMS_EVENT_ENDPOINT={endpoint}"
+        plugin = base64.b64encode(self._plugin_source().encode()).decode()
         command = (
             "set -euo pipefail; "
             'mkdir -p "$HOME/.opencode/bin"; '
@@ -101,12 +120,18 @@ exit "$status"
             f"printf '%s' {shlex.quote(wrapper)} | base64 -d > "
             '"$HOME/.opencode/bin/opencode"; '
             'chmod 0755 "$HOME/.opencode/bin/opencode"; '
-            'mkdir -p "$HOME/.config/opencode/plugins" "$HOME/.nvm"; '
+            'mkdir -p "$HOME/.nvm"; '
+            'if [[ "${GRAMS_MODE:-on}" != "off" ]]; then '
+            'mkdir -p "$HOME/.config/opencode/plugins"; '
             f"printf '%s' {shlex.quote(plugin)} | base64 -d > "
             '"$HOME/.config/opencode/plugins/grams-receiver.ts"; '
-            f"printf '%s\\n%s\\n' {shlex.quote(path_line)} "
-            f"{shlex.quote(endpoint_line)}"
+            'fi; '
+            f"printf '%s\\n' {shlex.quote(path_line)}"
             ' > "$HOME/.nvm/nvm.sh"; '
+            'if [[ "${GRAMS_MODE:-on}" != "off" ]]; then '
+            f"printf '%s\\n' {shlex.quote(endpoint_line)}"
+            ' >> "$HOME/.nvm/nvm.sh"; '
+            'fi; '
             '. "$HOME/.nvm/nvm.sh"; '
             "opencode --version"
         )

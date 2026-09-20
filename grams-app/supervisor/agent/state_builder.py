@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+import copy
+import json
 
 from supervisor.memory.client import _field
 from supervisor.observability import sanitize
@@ -271,3 +273,72 @@ def build_jev_process_state(state: dict[str, Any]) -> dict[str, Any]:
         "operational_metrics": metrics,
         "expanded_memory": _expanded_context(state.get("expanded_memory_context")),
     }
+
+
+def estimate_json_tokens(value: Any) -> int:
+    """Conservatively estimate tokens using UTF-8 byte-level tokenization."""
+    serialized = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return len(serialized.encode("utf-8"))
+
+
+def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, Any]:
+    """Keep the highest-value portions of a Jev state within a token budget."""
+    compacted = copy.deepcopy(state)
+    omitted: dict[str, int] = {}
+
+    def size() -> int:
+        candidate = compacted
+        if omitted:
+            candidate = {
+                **compacted,
+                "context_compaction": {
+                    "truncated": True,
+                    "omitted_items": omitted,
+                    "budget_tokens": max_tokens,
+                },
+            }
+        return estimate_json_tokens(candidate)
+
+    def drop_from(path: tuple[str, ...], key: str) -> bool:
+        target: Any = compacted
+        for part in path:
+            if not isinstance(target, dict):
+                return False
+            target = target.get(part)
+        if isinstance(target, dict) and target:
+            target.pop(sorted(target)[0])
+        elif isinstance(target, list) and target:
+            target.pop(0)
+        else:
+            return False
+        omitted[key] = omitted.get(key, 0) + 1
+        return True
+
+    # Expanded graph data and older execution events are optional first losses.
+    drop_paths = [
+        (("expanded_memory", "subgraphs"), "expanded_subgraphs"),
+        (("expanded_memory", "memories"), "expanded_memories"),
+        (("expanded_memory", "category_pages"), "expanded_category_pages"),
+        (("expanded_memory", "related_processes"), "expanded_related_processes"),
+        (("expanded_memory", "summaries"), "expanded_summaries"),
+        (("recent_execution",), "recent_execution"),
+        (("relations",), "relations"),
+        (("evidence",), "evidence"),
+        (("strategy",), "strategy"),
+    ]
+    while size() > max_tokens:
+        changed = False
+        for path, key in drop_paths:
+            if drop_from(path, key):
+                changed = True
+                break
+        if not changed:
+            break
+
+    if omitted:
+        compacted["context_compaction"] = {
+            "truncated": True,
+            "omitted_items": omitted,
+            "budget_tokens": max_tokens,
+        }
+    return compacted

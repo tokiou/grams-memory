@@ -178,6 +178,8 @@ Do not persist:
 - information already represented by an existing memory.
 
 Prefer a small number of high-value memories.
+Return at most 6 memories and 12 relations. Keep each title under 200 characters
+and each content under 1200 characters.
 
 Do not create SUMMARY memories.
 Do not decide whether the process should continue.
@@ -228,6 +230,7 @@ Do not:
 - replace the underlying memories.
 
 Prioritize causal and decision-relevant information.
+Keep the summary under 4000 characters.
 
 Return only the structured summary.
 """.strip()

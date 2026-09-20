@@ -163,7 +163,7 @@ def build_runtime(
     process_service=None,
     batch_size=20,
     run_id=None,
-    max_expansion_depth=2,
+    max_expansion_depth=3,
     checkpointer=None,
 ) -> SupervisorRuntime:
     graph = build_graph(

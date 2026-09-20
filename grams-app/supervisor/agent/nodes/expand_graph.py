@@ -17,12 +17,19 @@ def _scoped_memory_ids(state: dict[str, Any]) -> set[str]:
     }
 
 
-def make_expand_graph(memory, *, max_depth=2):
+def make_expand_graph(memory, *, max_depth=3):
     if max_depth < 1:
         raise ValueError("max_depth must be positive")
+    if max_depth > 3:
+        raise ValueError("max_depth cannot exceed 3")
 
     async def node(state):
-        previous_depth = int(state.get("memory_expansion_depth", 0))
+        raw_depth = state.get("memory_expansion_depth", 0)
+        if not isinstance(raw_depth, int) or isinstance(raw_depth, bool) or raw_depth < 0:
+            raise ValueError("memory_expansion_depth must be an integer from zero to three")
+        previous_depth = raw_depth
+        if previous_depth > 3:
+            raise ValueError("memory_expansion_depth cannot exceed three")
         if previous_depth >= max_depth:
             return {"memory_expansion_exhausted": True, "memory_expansion_depth": previous_depth}
         depth = previous_depth + 1
@@ -72,10 +79,14 @@ def make_expand_graph(memory, *, max_depth=2):
                 if not memory_id or str(_field(value, "category_id")) != str(category_id):
                     raise RuntimeError("paginated memory escaped the requested process category")
                 paged_values[str(memory_id)] = value
-            category_pages[category] = [
-                *category_pages.get(category, []),
-                *values,
-            ]
+            existing = {
+                str(_field(item, "id")): item
+                for item in category_pages.get(category, [])
+                if _field(item, "id")
+            }
+            for value in values:
+                existing.setdefault(str(_field(value, "id")), value)
+            category_pages[category] = list(existing.values())
             category_page_exhausted[category] = len(values) < 50
 
         seeds = list(dict.fromkeys([
