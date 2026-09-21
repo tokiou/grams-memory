@@ -6,6 +6,9 @@ from typing import Any, TypedDict
 
 from supervisor.agent.schemas import (
     ClaimedInboxEvent,
+    FactualMemoryCandidate,
+    MemoryCurationProposal,
+    MemoryMaterialization,
     MemoryUpdateProposal,
     ProcessContinuityDecision,
     SupervisionDecision,
@@ -41,6 +44,9 @@ class SupervisorState(TypedDict, total=False):
     pending_process_transition: dict[str, Any]
 
     # Memory update proposal and application result.
+    memory_candidates: list[FactualMemoryCandidate]
+    memory_curation: MemoryCurationProposal
+    memory_materializations: list[MemoryMaterialization]
     proposed_memory_update: MemoryUpdateProposal
     memory_update_result: dict[str, Any]
 

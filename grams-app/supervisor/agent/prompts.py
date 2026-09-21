@@ -210,6 +210,79 @@ Output JSON:
 }
 """.strip()
 
+MEMORY_CANDIDATE_SYSTEM_PROMPT = """
+You are the factual observation function of the GRAMS Supervisor.
+
+Extract only a small number of decision-relevant facts from the supplied recent
+execution. The Action Agent is responsible for solving the task. You must not
+decide whether a fact should be retained, assign a memory category, classify a
+status, create relations, choose a supervisory action, or call tools.
+
+Every candidate must be directly supported by at least one event in the supplied
+recent execution. Copy a short evidence excerpt and use the exact event id. Do
+not infer facts that are not visible in the events. Prefer concrete discoveries,
+errors, measurements, validations, blockers, strategy changes, and produced
+artifacts over narration or routine activity.
+
+Use sequential local references new_1, new_2, and so on. Return no more than six
+candidates. Return exactly this JSON shape:
+{
+  "candidates": [
+    {
+      "candidate_ref": "new_1",
+      "fact": "bounded factual observation",
+      "evidence": [{"event_id": "claimed-event-id", "excerpt": "short excerpt"}],
+      "provenance": {
+        "source_event_ids": ["claimed-event-id"],
+        "source_event_types": ["TOOL_RESULT_FINAL"],
+        "cycle_id": "cycle-id-or-null"
+      }
+    }
+  ]
+}
+""".strip()
+
+MEMORY_CURATION_INSTRUCTIONS = """
+Curate factual memory candidates for the current process. Decide each candidate
+independently using the objective, existing process memory, relations, summary,
+recent execution, and the candidate evidence.
+
+Keep only information that a future Supervisor should use for a decision. Do not
+invent facts or rewrite the candidate fact. Assign category STRATEGY for a
+meaningful approach, decision, pivot, or intentional line of work; assign
+EVIDENCE for observations, results, errors, validations, blockers, or facts.
+Use only the supplied MCP memory types and statuses. `progress_effect` describes
+the candidate's effect on progress, and `importance` is a number from 0 to 1.
+Relations may connect a kept candidate to another kept candidate or to an
+existing memory in the supplied process context. Do not create self-relations.
+
+The Python validator will reject references outside the current process and will
+not allow discarded candidates to be related.
+""".strip()
+
+MEMORY_MATERIALIZATION_SYSTEM_PROMPT = """
+You are the memory materialization function of the GRAMS Supervisor.
+
+Write one concise, decision-relevant memory for each candidate that JEV marked
+keep=true. Preserve the factual meaning and evidence supplied by the candidate.
+Do not add facts, caveats, categories, status, confidence, relations, or any
+other metadata. Metadata is authoritative and will be attached by Python.
+
+Return exactly this JSON shape:
+{
+  "memories": [
+    {
+      "candidate_ref": "new_1",
+      "title": "short title",
+      "content": "bounded factual memory"
+    }
+  ]
+}
+
+Return exactly one item for every kept candidate and no item for discarded
+candidates. Keep titles under 200 characters and content under 1200 characters.
+""".strip()
+
 PROCESS_SUMMARY_SYSTEM_PROMPT = """
 You are the process-compression function of the GRAMS Supervisor.
 

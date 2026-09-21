@@ -44,7 +44,8 @@ def _canonical(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
 
 def _memory(value: Any) -> dict[str, Any]:
     return _canonical(value, (
-        "id", "category_id", "title", "content", "status", "source", "created_at", "updated_at",
+        "id", "category_id", "title", "content", "description", "type", "status", "graph_tier",
+        "confidence", "source", "created_at", "updated_at",
     ))
 
 
@@ -268,6 +269,7 @@ def build_jev_process_state(state: dict[str, Any]) -> dict[str, Any]:
         "current_process": current_process,
         "strategy": strategy,
         "evidence": evidence,
+        "summary": _memory(context.get("summary")) if context.get("summary") else None,
         "relations": [_relation(item) for item in context.get("relations") or []],
         "recent_execution": events,
         "operational_metrics": metrics,
