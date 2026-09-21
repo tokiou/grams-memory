@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from supervisor.agent.prompts import INTERVENTION_SYSTEM_PROMPT
+from supervisor.agent.schemas import REASON_CODES
 from supervisor.agent.state_builder import build_jev_process_state
 
 
@@ -15,6 +16,8 @@ def make_build_intervention(openrouter):
             raise ValueError("INTERVENE requires evidence_memory_ids")
         if not isinstance(reason_codes, list) or not reason_codes:
             raise ValueError("INTERVENE requires reason_codes")
+        if any(reason not in REASON_CODES for reason in reason_codes):
+            raise ValueError("INTERVENE contains an unsupported reason code")
         canonical_state = build_jev_process_state(state)
         available = {
             str(memory.get("id")): memory

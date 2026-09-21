@@ -16,6 +16,17 @@ def make_materialize_memories(openrouter):
         curation = state.get("memory_curation") or {"decisions": [], "relations": []}
         decisions = {item["candidate_ref"]: item for item in curation["decisions"]}
         kept = {ref for ref, decision in decisions.items() if decision["keep"]}
+        all_candidate_refs = {candidate["candidate_ref"] for candidate in candidates}
+        materialization_curation = {
+            "decisions": [decision for decision in curation["decisions"] if decision["candidate_ref"] in kept],
+            "relations": [
+                relation for relation in curation["relations"]
+                if not (
+                    (relation["source_ref"] in all_candidate_refs and relation["source_ref"] not in kept)
+                    or (relation["target_ref"] in all_candidate_refs and relation["target_ref"] not in kept)
+                )
+            ],
+        }
         if not kept:
             return {
                 "memory_materializations": [],
@@ -26,7 +37,7 @@ def make_materialize_memories(openrouter):
             payload={
                 **build_jev_process_state(state),
                 "memory_candidates": [candidate for candidate in candidates if candidate["candidate_ref"] in kept],
-                "memory_curation": curation,
+                "memory_curation": materialization_curation,
             },
             system_prompt=MEMORY_MATERIALIZATION_SYSTEM_PROMPT,
             schema=MEMORY_MATERIALIZATION_JSON_SCHEMA,
@@ -53,6 +64,12 @@ def make_materialize_memories(openrouter):
             })
         relations = []
         for relation in curation["relations"]:
+            if (
+                relation["source_ref"] in all_candidate_refs and relation["source_ref"] not in kept
+            ) or (
+                relation["target_ref"] in all_candidate_refs and relation["target_ref"] not in kept
+            ):
+                continue
             relations.append({
                 "source_id": relation["source_ref"],
                 "relation_type": relation["relation_type"],
@@ -62,6 +79,7 @@ def make_materialize_memories(openrouter):
         proposal = validate_memory_proposal({"memories": memories, "relations": relations})
         return {
             "memory_materializations": materializations,
+            "memory_curation": materialization_curation,
             "proposed_memory_update": proposal,
         }
 

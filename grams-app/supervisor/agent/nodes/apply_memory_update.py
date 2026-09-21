@@ -329,6 +329,9 @@ def make_apply_memory_update(memory):
             )
             if not isinstance(linked, dict) or not _field(linked, "id"):
                 raise RuntimeError("Memory MCP returned an invalid created relation")
+            link_metadata = _link_metadata(relation)
+            if link_metadata and any(_field(linked, field) is None for field in link_metadata):
+                raise RuntimeError("Memory MCP returned an incomplete curated relation")
             for field, expected in (("source_id", source), ("target_id", target), ("relation", relation["relation_type"])):
                 if _field(linked, field) is not None and str(_field(linked, field)) != str(expected):
                     raise RuntimeError(f"Memory MCP returned incompatible relation {field}")
