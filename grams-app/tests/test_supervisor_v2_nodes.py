@@ -253,6 +253,19 @@ def test_jev_state_compaction_is_deterministic_and_marks_omissions():
     assert json.dumps(first, separators=(",", ":"))
 
 
+def test_jev_state_compaction_preserves_recent_memory():
+    state = {
+        "evidence": [
+            {"id": "newest", "content": "x" * 500},
+            {"id": "middle", "content": "y" * 500},
+            {"id": "oldest", "content": "z" * 500},
+        ],
+    }
+    compacted = compact_jev_state(state, max_tokens=700)
+
+    assert [item["id"] for item in compacted["evidence"]] == ["newest"]
+
+
 def test_jev_client_compacts_before_posting():
     async def scenario():
         requests = []

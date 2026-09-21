@@ -299,7 +299,7 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
             }
         return estimate_json_tokens(candidate)
 
-    def drop_from(path: tuple[str, ...], key: str) -> bool:
+    def drop_from(path: tuple[str, ...], key: str, *, from_end: bool = False) -> bool:
         target: Any = compacted
         for part in path:
             if not isinstance(target, dict):
@@ -308,7 +308,7 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
         if isinstance(target, dict) and target:
             target.pop(sorted(target)[0])
         elif isinstance(target, list) and target:
-            target.pop(0)
+            target.pop(-1 if from_end else 0)
         else:
             return False
         omitted[key] = omitted.get(key, 0) + 1
@@ -316,20 +316,21 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
 
     # Expanded graph data and older execution events are optional first losses.
     drop_paths = [
-        (("expanded_memory", "subgraphs"), "expanded_subgraphs"),
-        (("expanded_memory", "memories"), "expanded_memories"),
-        (("expanded_memory", "category_pages"), "expanded_category_pages"),
-        (("expanded_memory", "related_processes"), "expanded_related_processes"),
-        (("expanded_memory", "summaries"), "expanded_summaries"),
-        (("recent_execution",), "recent_execution"),
-        (("relations",), "relations"),
-        (("evidence",), "evidence"),
-        (("strategy",), "strategy"),
+        (("expanded_memory", "subgraphs"), "expanded_subgraphs", False),
+        (("expanded_memory", "memories"), "expanded_memories", False),
+        (("expanded_memory", "category_pages"), "expanded_category_pages", False),
+        (("expanded_memory", "related_processes"), "expanded_related_processes", False),
+        (("expanded_memory", "summaries"), "expanded_summaries", False),
+        (("recent_execution",), "recent_execution", False),
+        (("relations",), "relations", False),
+        # Memory search orders these lists newest-first; preserve recent items.
+        (("evidence",), "evidence", True),
+        (("strategy",), "strategy", True),
     ]
     while size() > max_tokens:
         changed = False
-        for path, key in drop_paths:
-            if drop_from(path, key):
+        for path, key, from_end in drop_paths:
+            if drop_from(path, key, from_end=from_end):
                 changed = True
                 break
         if not changed:
