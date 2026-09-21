@@ -600,6 +600,87 @@ def test_apply_memory_update_persists_curated_metadata_in_mcp_compatible_payload
     asyncio.run(scenario())
 
 
+def test_apply_memory_update_rejects_incomplete_curated_relation_response():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.created = 0
+
+            async def create(self, value):
+                self.created += 1
+                return {"id": f"memory-{self.created}", **value}
+
+            async def link(self, *args, **kwargs):
+                return {"id": "edge-1"}
+
+        def curated(category, ref):
+            return {
+                "category": category,
+                "title": ref,
+                "content": ref,
+                "candidate_ref": ref,
+                "role": "RESULT",
+                "status": "FAILED",
+                "confidence": 0.9,
+                "progress_effect": "NEGATIVE",
+                "importance": 0.9,
+                "provenance": {
+                    "source_event_ids": ["event-1"],
+                    "source_event_types": ["TOOL_RESULT_FINAL"],
+                    "cycle_id": None,
+                },
+            }
+
+        with pytest.raises(RuntimeError, match="incomplete curated relation"):
+            await make_apply_memory_update(Memory())({
+                "process_context": {
+                    "category_ids": {"STRATEGY": "cat-s", "EVIDENCE": "cat-e"},
+                    "categories": {"STRATEGY": [], "EVIDENCE": []},
+                    "relations": [],
+                },
+                "proposed_memory_update": {
+                    "memories": [curated("EVIDENCE", "new_1"), curated("STRATEGY", "new_2")],
+                    "relations": [{
+                        "source_id": "new_1",
+                        "relation_type": "SUPPORTS",
+                        "target_id": "new_2",
+                        "confidence": 0.9,
+                        "evidence_strength": "STRONG",
+                        "direct": True,
+                    }],
+                },
+            })
+
+    asyncio.run(scenario())
+
+
+def test_materialize_memories_sends_only_kept_curation_decisions():
+    async def scenario():
+        class Generator:
+            async def generate_json(self, **kwargs):
+                assert [item["candidate_ref"] for item in kwargs["payload"]["memory_candidates"]] == ["new_1"]
+                assert [item["candidate_ref"] for item in kwargs["payload"]["memory_curation"]["decisions"]] == ["new_1"]
+                return {"memories": [{"candidate_ref": "new_1", "title": "Kept", "content": "Kept fact"}]}
+
+        candidates = [{
+            "candidate_ref": "new_1", "fact": "kept", "evidence": [{"event_id": "e1", "excerpt": "kept"}],
+            "provenance": {"source_event_ids": ["e1"], "source_event_types": ["TEXT_FINAL"], "cycle_id": "c1"},
+        }, {
+            "candidate_ref": "new_2", "fact": "dropped", "evidence": [{"event_id": "e1", "excerpt": "dropped"}],
+            "provenance": {"source_event_ids": ["e1"], "source_event_types": ["TEXT_FINAL"], "cycle_id": "c1"},
+        }]
+        result = await make_materialize_memories(Generator())({
+            "memory_candidates": candidates,
+            "memory_curation": {"decisions": [
+                {"candidate_ref": "new_1", "keep": True, "category": "EVIDENCE", "role": "RESULT", "status": "VALIDATED", "confidence": 0.9, "progress_effect": "POSITIVE", "importance": 0.9},
+                {"candidate_ref": "new_2", "keep": False, "category": "EVIDENCE", "role": "ERROR", "status": "FAILED", "confidence": 0.8, "progress_effect": "NEGATIVE", "importance": 0.5},
+            ], "relations": []},
+        })
+        assert result["proposed_memory_update"]["memories"][0]["candidate_ref"] == "new_1"
+
+    asyncio.run(scenario())
+
+
 def test_apply_memory_update_rejects_out_of_scope_relation_before_writes():
     async def scenario():
         class Memory:
@@ -762,6 +843,34 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
             "session-1",
             format_intervention_for_agent("Run the focused validation."),
         )]
+
+    asyncio.run(scenario())
+
+
+def test_build_intervention_rejects_unallowlisted_reason_without_model_call():
+    async def scenario():
+        class Generator:
+            def __init__(self):
+                self.calls = 0
+
+            async def generate_text(self, **kwargs):
+                self.calls += 1
+                return "unexpected"
+
+        generator = Generator()
+        with pytest.raises(ValueError, match="unsupported reason code"):
+            await make_build_intervention(generator)({
+                "supervision_decision": {
+                    "action": "INTERVENE",
+                    "evidence_memory_ids": ["m1"],
+                    "reason_codes": ["NOT_ALLOWLISTED"],
+                },
+                "process_context": {
+                    "categories": {"EVIDENCE": [{"id": "m1", "category_id": "cat-e"}]},
+                    "category_ids": {"EVIDENCE": "cat-e"},
+                },
+            })
+        assert generator.calls == 0
 
     asyncio.run(scenario())
 
