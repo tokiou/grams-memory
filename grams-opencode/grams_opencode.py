@@ -55,6 +55,64 @@ if [[ "${1:-}" == "--version" ]]; then
   exec "$real" "$@"
 fi
 
+if ! runtime_root="$(mktemp -d /tmp/grams-opencode-runtime.XXXXXX)" ||
+  [[ -z "$runtime_root" ]]; then
+  printf 'Failed to create OpenCode runtime directory\n' >&2
+  exit 1
+fi
+data_home="$runtime_root/data"
+state_home="$runtime_root/state"
+archive_root=/logs/agent/opencode
+archive_data="$archive_root/xdg-data"
+archive_state="$archive_root/xdg-state"
+mkdir -p "$data_home" "$state_home" "$archive_root"
+export XDG_DATA_HOME="$data_home"
+export XDG_STATE_HOME="$state_home"
+
+archive_runtime() {
+  mkdir -p "$archive_data" "$archive_state"
+  if [[ -d "$data_home" ]]; then
+    cp -a "$data_home"/. "$archive_data"/ 2>>"$wrapper_log" ||
+      printf 'Failed to archive OpenCode XDG data\n' >>"$wrapper_log"
+  fi
+  if [[ -d "$state_home" ]]; then
+    cp -a "$state_home"/. "$archive_state"/ 2>>"$wrapper_log" ||
+      printf 'Failed to archive OpenCode XDG state\n' >>"$wrapper_log"
+  fi
+  rm -rf "$runtime_root"
+}
+
+cleanup() {
+  status=$?
+  trap - EXIT INT TERM HUP
+
+  stop_process() {
+    pid="$1"
+    kill "$pid" 2>/dev/null || return 0
+    for _ in $(seq 1 50); do
+      state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+      if [[ -z "$state" || "$state" == Z* ]]; then
+        wait "$pid" 2>/dev/null || true
+        return 0
+      fi
+      sleep 0.1
+    done
+    kill -9 "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  }
+
+  if [[ -n "${run_pid:-}" ]]; then stop_process "$run_pid"; fi
+  if [[ -n "${tee_pid:-}" ]]; then stop_process "$tee_pid"; fi
+  if [[ -n "${server_pid:-}" ]]; then stop_process "$server_pid"; fi
+  if [[ -n "${health_monitor_pid:-}" ]]; then stop_process "$health_monitor_pid"; fi
+  if [[ -n "${run_pipe:-}" ]]; then rm -f "$run_pipe"; fi
+  archive_runtime
+  exit "$status"
+}
+
+trap cleanup EXIT
+trap 'exit 143' INT TERM HUP
+
 printf 'Starting OpenCode server on port 4096\\n' >"$wrapper_log"
 "$real" serve --hostname 0.0.0.0 --port 4096 >"$server_log" 2>&1 &
 server_pid=$!
@@ -70,13 +128,12 @@ done
 if [[ "$ready" != "1" ]]; then
   printf 'OpenCode server failed health check after 12 seconds\\n' >>"$wrapper_log"
   curl --max-time 2 -v http://127.0.0.1:4096/global/health >>"$wrapper_log" 2>&1 || true
-  kill "$server_pid" 2>/dev/null || true
   exit 1
 fi
 printf 'OpenCode server health check passed\\n' >>"$wrapper_log"
 
 # OpenCode can log fatal session errors without emitting a plugin event.
-internal_log=/logs/agent/opencode/xdg-data/opencode/log/opencode.log
+internal_log="$data_home/opencode/log/opencode.log"
 python3 - "${GRAMS_EVENT_ENDPOINT:-}" "$internal_log" "$server_pid" <<'PY' >/logs/agent/opencode-health.log 2>&1 &
 import hashlib
 import json
@@ -153,24 +210,30 @@ for arg in "$@"; do
   fi
 done
 
-trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-"$real" "${args[@]}" 2>&1 | tee "$run_output"
-status=${PIPESTATUS[0]}
+run_pipe="$runtime_root/run-output"
+mkfifo "$run_pipe"
+tee "$run_output" <"$run_pipe" &
+tee_pid=$!
+"$real" "${args[@]}" >"$run_pipe" 2>&1 &
+run_pid=$!
+wait "$run_pid"
+status=$?
+run_pid=
+wait "$tee_pid" 2>/dev/null || true
+tee_pid=
+rm -f "$run_pipe"
 if [[ -n "${GRAMS_EVENT_ENDPOINT:-}" ]]; then
   # The plugin can receive session.error after the CLI stream has ended. Keep
   # the API alive long enough for the Supervisor's follow-up prompt to arrive.
   sleep "${GRAMS_FOLLOW_UP_GRACE_SECONDS:-90}"
 fi
-kill "$server_pid" 2>/dev/null || true
-kill "$health_monitor_pid" 2>/dev/null || true
-trap - EXIT
 exit "$status"
 '''
 
     async def install(self, environment: BaseEnvironment) -> None:
         await self.exec_as_root(
             environment,
-            command="apt-get update && apt-get install -y curl ca-certificates git",
+            command="apt-get update && apt-get install -y curl ca-certificates git python3",
             env={"DEBIAN_FRONTEND": "noninteractive"},
         )
 
