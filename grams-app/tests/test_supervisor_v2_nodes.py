@@ -12,8 +12,11 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from supervisor.agent.nodes.apply_memory_update import make_apply_memory_update
 from supervisor.agent.nodes.build_intervention import make_build_intervention
+from supervisor.agent.nodes.curate_memory_candidates import make_curate_memory_candidates
 from supervisor.agent.nodes.expand_graph import make_expand_graph
+from supervisor.agent.nodes.extract_memory_candidates import make_extract_memory_candidates
 from supervisor.agent.nodes.finalize_cycle import make_finalize_cycle
+from supervisor.agent.nodes.materialize_memories import make_materialize_memories
 from supervisor.agent.nodes.record_intervention import make_record_intervention
 from supervisor.agent.nodes.send_intervention import make_send_intervention
 from supervisor.agent.nodes.supervision_decision import make_supervision_decision
@@ -21,7 +24,12 @@ from supervisor.agent.graph import build_graph
 from supervisor.agent.prompts import format_intervention_for_agent
 from supervisor.agent.runtime import SupervisorRuntime
 from supervisor.agent.services.openrouter_service import OpenRouterClient
-from supervisor.agent.schemas import validate_memory_proposal, validate_summary
+from supervisor.agent.schemas import (
+    validate_materializations,
+    validate_memory_candidates,
+    validate_memory_proposal,
+    validate_summary,
+)
 from supervisor.agent.state_builder import build_jev_process_state
 from supervisor.agent.state_builder import compact_jev_state, estimate_json_tokens
 from supervisor.agent.services.jev_service import JevClient
@@ -147,6 +155,95 @@ def test_memory_and_summary_validators_enforce_output_bounds():
         })
     with pytest.raises(ValueError, match="summary content cannot exceed"):
         validate_summary({"content": "x" * 4001, "outcome": "FAILED"})
+
+
+def test_memory_candidates_require_claimed_event_provenance_and_materializations_are_strict():
+    events = [{"id": "event-1", "type": "TOOL_RESULT_FINAL"}]
+    candidate = {
+        "candidate_ref": "new_1",
+        "fact": "The focused validation failed.",
+        "evidence": [{"event_id": "event-1", "excerpt": "exit code 1"}],
+        "provenance": {
+            "source_event_ids": ["event-1"],
+            "source_event_types": ["TOOL_RESULT_FINAL"],
+            "cycle_id": "cycle-1",
+        },
+    }
+    assert validate_memory_candidates({"candidates": [candidate]}, events)[0]["candidate_ref"] == "new_1"
+    with pytest.raises(ValueError, match="claimed event"):
+        validate_memory_candidates({"candidates": [{
+            **candidate,
+            "evidence": [{"event_id": "foreign", "excerpt": "not claimed"}],
+        }]}, events)
+    with pytest.raises(ValueError, match="not kept"):
+        validate_materializations({"memories": [{
+            "candidate_ref": "new_1", "title": "title", "content": "content", "status": "ACTIVE",
+        }]}, {"new_1"})
+
+
+def test_extract_curate_and_materialize_memory_pipeline_keeps_jev_metadata_authoritative():
+    async def scenario():
+        candidate = {
+            "candidate_ref": "new_1",
+            "fact": "The focused validation failed.",
+            "evidence": [{"event_id": "event-1", "excerpt": "exit code 1"}],
+            "provenance": {
+                "source_event_ids": ["event-1"],
+                "source_event_types": ["TOOL_RESULT_FINAL"],
+                "cycle_id": "cycle-1",
+            },
+        }
+
+        class Generator:
+            def __init__(self):
+                self.operations = []
+
+            async def generate_json(self, **kwargs):
+                self.operations.append(kwargs["operation"])
+                if kwargs["operation"] == "EXTRACT_MEMORY_CANDIDATES":
+                    return {"candidates": [candidate]}
+                return {"memories": [{"candidate_ref": "new_1", "title": "Validation failed", "content": "The focused validation failed."}]}
+
+        def choice(value):
+            return {"type": "choice", "choice": value, "probabilities": {value: 1.0}, "confidence": 0.9}
+
+        class Curator:
+            async def system_one(self, *, state, questions):
+                assert state["memory_candidates"] == [candidate]
+                return {"answers": {
+                    "new_1_keep": choice("KEEP"),
+                    "new_1_category": choice("EVIDENCE"),
+                    "new_1_role": choice("RESULT"),
+                    "new_1_status": choice("FAILED"),
+                    "new_1_progress": choice("NEGATIVE"),
+                    "new_1_importance": choice("HIGH"),
+                    "new_1_relation": choice("NONE"),
+                }}
+
+        state = {
+            "original_task": "solve",
+            "claimed_events": [{"id": "event-1", "type": "TOOL_RESULT_FINAL", "cycle_id": "cycle-1"}],
+            "process_context": {
+                "process": {"id": "p1"},
+                "categories": {"STRATEGY": [], "EVIDENCE": []},
+                "relations": [],
+            },
+        }
+        generator = Generator()
+        extracted = await make_extract_memory_candidates(generator)(state)
+        state.update(extracted)
+        state.update(await make_curate_memory_candidates(Curator())(state))
+        state.update(await make_materialize_memories(generator)(state))
+        assert generator.operations == ["EXTRACT_MEMORY_CANDIDATES", "MATERIALIZE_MEMORIES"]
+        memory = state["proposed_memory_update"]["memories"][0]
+        assert memory["category"] == "EVIDENCE"
+        assert memory["role"] == "RESULT"
+        assert memory["status"] == "FAILED"
+        assert memory["confidence"] == 0.9
+        assert memory["importance"] == 0.9
+        assert state["proposed_memory_update"]["relations"] == []
+
+    asyncio.run(scenario())
 
 
 def test_state_builder_normalizes_nested_plugin_payload_and_excludes_budgets():
@@ -443,6 +540,63 @@ def test_apply_memory_update_deduplicates_and_resolves_local_refs():
     asyncio.run(scenario())
 
 
+def test_apply_memory_update_persists_curated_metadata_in_mcp_compatible_payload():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.created = []
+
+            async def create(self, value):
+                self.created.append(value)
+                return {
+                    "id": "m-curated",
+                    "category_id": value["category_id"],
+                    "type": value["type"],
+                    "status": value["status"],
+                    "confidence": value["confidence"],
+                }
+
+        memory = Memory()
+        result = await make_apply_memory_update(memory)({
+            "claimed_events": [{"id": "event-1", "cycle_id": "cycle-curated"}],
+            "process_context": {
+                "category_ids": {"STRATEGY": "cat-s", "EVIDENCE": "cat-e"},
+                "categories": {"STRATEGY": [], "EVIDENCE": []},
+                "relations": [],
+            },
+            "proposed_memory_update": {
+                "memories": [{
+                    "category": "EVIDENCE",
+                    "title": "Validation failed",
+                    "content": "The focused validation failed.",
+                    "candidate_ref": "new_1",
+                    "role": "RESULT",
+                    "status": "FAILED",
+                    "confidence": 0.9,
+                    "progress_effect": "NEGATIVE",
+                    "importance": 0.9,
+                    "provenance": {
+                        "source_event_ids": ["event-1"],
+                        "source_event_types": ["TOOL_RESULT_FINAL"],
+                        "cycle_id": "cycle-curated",
+                    },
+                }],
+                "relations": [],
+            },
+        })
+        payload = memory.created[0]
+        assert payload["type"] == "RESULT"
+        assert payload["status"] == "FAILED"
+        assert payload["confidence"] == 0.9
+        assert payload["description"].splitlines()[0] == "cycle-curated:new_1"
+        envelope = json.loads(payload["description"].splitlines()[1].removeprefix("GRAMS_CURATION_V1:"))
+        assert envelope["progress_effect"] == "NEGATIVE"
+        assert envelope["provenance"]["source_event_ids"] == ["event-1"]
+        assert result["memory_update_result"]["created_memory_ids"] == ["m-curated"]
+
+    asyncio.run(scenario())
+
+
 def test_apply_memory_update_rejects_out_of_scope_relation_before_writes():
     async def scenario():
         class Memory:
@@ -718,8 +872,8 @@ def test_compiled_graph_runs_continue_route_end_to_end_with_fakes():
 
         class Generator:
             async def generate_json(self, **kwargs):
-                assert kwargs["operation"] == "EXTRACT_MEMORY_UPDATE"
-                return {"memories": [], "relations": []}
+                assert kwargs["operation"] == "EXTRACT_MEMORY_CANDIDATES"
+                return {"candidates": []}
 
         class OpenCode:
             async def send_message(self, session_id, message):

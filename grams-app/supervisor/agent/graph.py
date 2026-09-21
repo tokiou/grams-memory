@@ -7,11 +7,13 @@ from supervisor.agent.nodes.assess_agent_health import make_assess_agent_health
 from supervisor.agent.nodes.assess_process_continuity import make_assess_process_continuity
 from supervisor.agent.nodes.build_intervention import make_build_intervention
 from supervisor.agent.nodes.close_current_process import make_close_current_process
+from supervisor.agent.nodes.curate_memory_candidates import make_curate_memory_candidates
 from supervisor.agent.nodes.ensure_active_process import make_ensure_active_process
 from supervisor.agent.nodes.expand_graph import make_expand_graph
-from supervisor.agent.nodes.extract_memory_update import make_extract_memory_update
+from supervisor.agent.nodes.extract_memory_candidates import make_extract_memory_candidates
 from supervisor.agent.nodes.finalize_cycle import make_finalize_cycle
 from supervisor.agent.nodes.load_process_context import make_load_process_context
+from supervisor.agent.nodes.materialize_memories import make_materialize_memories
 from supervisor.agent.nodes.read_inbox import make_read_inbox
 from supervisor.agent.nodes.record_intervention import make_record_intervention
 from supervisor.agent.nodes.send_intervention import make_send_intervention
@@ -53,7 +55,9 @@ def build_graph(
     graph.add_node("ENSURE_ACTIVE_PROCESS", make_ensure_active_process(process_service))
     graph.add_node("LOAD_PROCESS_CONTEXT", make_load_process_context(memory))
     graph.add_node("ASSESS_PROCESS_CONTINUITY", make_assess_process_continuity(jev))
-    graph.add_node("EXTRACT_MEMORY_UPDATE", make_extract_memory_update(openrouter))
+    graph.add_node("EXTRACT_MEMORY_CANDIDATES", make_extract_memory_candidates(openrouter))
+    graph.add_node("CURATE_MEMORY_CANDIDATES", make_curate_memory_candidates(jev))
+    graph.add_node("MATERIALIZE_MEMORIES", make_materialize_memories(openrouter))
     graph.add_node("APPLY_MEMORY_UPDATE", make_apply_memory_update(memory))
     graph.add_node("SUPERVISION_DECISION", make_supervision_decision(jev))
     graph.add_node("EXPAND_GRAPH", make_expand_graph(memory, max_depth=max_expansion_depth))
@@ -94,16 +98,18 @@ def build_graph(
         lambda state: state["context_route"],
         {
             "assess": "ASSESS_PROCESS_CONTINUITY",
-            "extract": "EXTRACT_MEMORY_UPDATE",
+            "extract": "EXTRACT_MEMORY_CANDIDATES",
             "supervise": "SUPERVISION_DECISION",
         },
     )
     graph.add_conditional_edges(
         "ASSESS_PROCESS_CONTINUITY",
         lambda state: state["process_continuity"]["decision"],
-        {"SAME_PROCESS": "EXTRACT_MEMORY_UPDATE", "NEW_PROCESS": "WRITE_PROCESS_SUMMARY"},
+        {"SAME_PROCESS": "EXTRACT_MEMORY_CANDIDATES", "NEW_PROCESS": "WRITE_PROCESS_SUMMARY"},
     )
-    graph.add_edge("EXTRACT_MEMORY_UPDATE", "APPLY_MEMORY_UPDATE")
+    graph.add_edge("EXTRACT_MEMORY_CANDIDATES", "CURATE_MEMORY_CANDIDATES")
+    graph.add_edge("CURATE_MEMORY_CANDIDATES", "MATERIALIZE_MEMORIES")
+    graph.add_edge("MATERIALIZE_MEMORIES", "APPLY_MEMORY_UPDATE")
     graph.add_edge("APPLY_MEMORY_UPDATE", "LOAD_PROCESS_CONTEXT")
     graph.add_conditional_edges(
         "SUPERVISION_DECISION",

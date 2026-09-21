@@ -225,6 +225,14 @@ def validate_memory_proposal(value: Any) -> MemoryUpdateProposal:
         for endpoint in (item["source_id"], item["target_id"]):
             if endpoint.startswith("new_") and endpoint not in refs:
                 raise ValueError(f"relation references unknown candidate {endpoint}")
+        if "confidence" in item and (
+            not isinstance(item["confidence"], (int, float)) or not 0 <= float(item["confidence"]) <= 1
+        ):
+            raise ValueError("relation confidence is invalid")
+        if "evidence_strength" in item and item["evidence_strength"] not in EVIDENCE_STRENGTHS:
+            raise ValueError("relation evidence strength is invalid")
+        if "direct" in item and not isinstance(item["direct"], bool):
+            raise ValueError("relation direct is invalid")
         if item["source_id"] == item["target_id"]:
             raise ValueError("self-relations are not supported")
     relations = [dict(relation) for relation in value["relations"]]
@@ -249,7 +257,7 @@ def validate_memory_candidates(value: Any, claimed_events: list[dict[str, Any]])
     refs: set[str] = set()
     candidates: list[FactualMemoryCandidate] = []
     for index, item in enumerate(value["candidates"], start=1):
-        if not isinstance(item, dict) or item.get("candidate_ref") != f"new_{index}":
+        if not isinstance(item, dict) or set(item) != {"candidate_ref", "fact", "evidence", "provenance"} or item.get("candidate_ref") != f"new_{index}":
             raise ValueError("candidate_ref values must be unique sequential new_N references")
         if item["candidate_ref"] in refs:
             raise ValueError("candidate_ref values must be unique")
@@ -261,14 +269,14 @@ def validate_memory_candidates(value: Any, claimed_events: list[dict[str, Any]])
             raise ValueError("each candidate requires one to four evidence items")
         normalized_evidence: list[CandidateEvidence] = []
         for proof in evidence:
-            if not isinstance(proof, dict) or proof.get("event_id") not in event_ids:
+            if not isinstance(proof, dict) or set(proof) != {"event_id", "excerpt"} or proof.get("event_id") not in event_ids:
                 raise ValueError("candidate evidence must reference a claimed event")
             excerpt = proof.get("excerpt")
             if not isinstance(excerpt, str) or not excerpt.strip() or len(excerpt.strip()) > MAX_CANDIDATE_EVIDENCE_LENGTH:
                 raise ValueError("candidate evidence excerpts are invalid")
             normalized_evidence.append({"event_id": proof["event_id"], "excerpt": excerpt.strip()})
         provenance = item.get("provenance")
-        if not isinstance(provenance, dict):
+        if not isinstance(provenance, dict) or set(provenance) != {"source_event_ids", "source_event_types", "cycle_id"}:
             raise ValueError("candidate provenance is required")
         source_event_ids = provenance.get("source_event_ids")
         if (
@@ -383,7 +391,7 @@ def validate_materializations(value: Any, kept_refs: set[str]) -> list[MemoryMat
     seen: set[str] = set()
     materializations: list[MemoryMaterialization] = []
     for item in value["memories"]:
-        if not isinstance(item, dict) or item.get("candidate_ref") not in kept_refs:
+        if not isinstance(item, dict) or set(item) != {"candidate_ref", "title", "content"} or item.get("candidate_ref") not in kept_refs:
             raise ValueError("materialization references a candidate that was not kept")
         ref = item["candidate_ref"]
         if ref in seen:
