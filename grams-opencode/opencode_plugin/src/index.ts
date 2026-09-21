@@ -1,7 +1,78 @@
 type OpenCodeEvent = Record<string, unknown>
 type RecordValue = Record<string, unknown>
+type PendingIntervention = {
+  id: string
+  session_id: string
+  message: string
+  claim_token: string
+}
 
 const endpoint = process.env.GRAMS_EVENT_ENDPOINT
+const interventionEndpoint = process.env.GRAMS_INTERVENTION_ENDPOINT
+
+async function interventionRequest(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<RecordValue | null> {
+  if (!interventionEndpoint) return null
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const response = await fetch(`${interventionEndpoint}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      console.error("GRAMS intervention request failed", response.status)
+      return null
+    }
+    const value: unknown = await response.json()
+    return firstRecord(value)
+  } catch (error) {
+    console.error("GRAMS intervention service unavailable", error)
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function claimIntervention(sessionID: string): Promise<PendingIntervention | null> {
+  const body = await interventionRequest("/claim", { session_id: sessionID })
+  const value = firstRecord(body?.intervention)
+  if (
+    typeof value.id !== "string" ||
+    typeof value.session_id !== "string" ||
+    typeof value.message !== "string" ||
+    typeof value.claim_token !== "string" ||
+    !value.id.trim() ||
+    !value.session_id.trim() ||
+    !value.claim_token.trim() ||
+    value.session_id !== sessionID ||
+    !value.message.trim()
+  ) {
+    return null
+  }
+  return {
+    id: value.id,
+    session_id: value.session_id,
+    message: value.message,
+    claim_token: value.claim_token,
+  }
+}
+
+async function consumeIntervention(intervention: PendingIntervention): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const result = await interventionRequest(
+      `/${encodeURIComponent(intervention.id)}/consume`,
+      { session_id: intervention.session_id, claim_token: intervention.claim_token },
+    )
+    if (result?.consumed === true) return true
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)))
+  }
+  return false
+}
 
 function firstRecord(...values: unknown[]): RecordValue {
   return values.find(
@@ -49,6 +120,22 @@ export const GramsReceiver = async () => {
   const finalizedParts = new Set<string>()
   const assistantMessages = new Map<string, Set<string>>()
   const userMessages = new Map<string, Set<string>>()
+  const sessions = new Set<string>()
+
+  const heartbeat = async (): Promise<void> => {
+    for (const sessionID of sessions) {
+      await emit(normalize(
+        "grams.heartbeat",
+        { properties: { sessionID, active_tool_call_id: null } },
+        "SESSION_HEARTBEAT",
+      ))
+    }
+  }
+
+  const heartbeatTimer = setInterval(() => {
+    void heartbeat()
+  }, 180_000)
+  void heartbeatTimer
 
   const partKey = (sessionID: string, part: OpenCodeEvent): string =>
     `${sessionID}:${String(part.id ?? "unknown")}`
@@ -107,6 +194,39 @@ export const GramsReceiver = async () => {
   }
 
   return {
+    "experimental.chat.system.transform": async (
+      input: { sessionID?: string },
+      output: { system: string[] },
+    ) => {
+      const sessionID = input.sessionID
+      if (!sessionID || !interventionEndpoint) return
+      if (!output || !Array.isArray(output.system)) {
+        console.error("GRAMS intervention cannot transform malformed system output")
+        return
+      }
+      if (output.system.length > 0 && typeof output.system[0] !== "string") {
+        console.error("GRAMS intervention cannot preserve the first system entry")
+        return
+      }
+
+      const intervention = await claimIntervention(sessionID)
+      if (!intervention) return
+      try {
+        if (output.system.length === 0) {
+          output.system[0] = intervention.message
+        } else {
+          output.system[0] = `${output.system[0]}\n\n${intervention.message}`
+        }
+      } catch (error) {
+        console.error("GRAMS intervention system mutation failed", error)
+        return
+      }
+
+      if (!await consumeIntervention(intervention)) {
+        console.error("GRAMS intervention consumption was not confirmed", intervention.id)
+      }
+    },
+
     event: async ({ event }: { event: OpenCodeEvent }) => {
       const kind = String(event.type ?? "unknown")
       const properties = firstRecord(event.properties, event.data)
@@ -116,6 +236,7 @@ export const GramsReceiver = async () => {
         const sessionID = typeof info.sessionID === "string" ? info.sessionID : undefined
         const messageID = typeof info.id === "string" ? info.id : undefined
         if (sessionID && messageID) {
+          sessions.add(sessionID)
           const messages = info.role === "assistant" ? assistantMessages : userMessages
           messageSet(messages, sessionID).add(messageID)
         }
@@ -130,6 +251,8 @@ export const GramsReceiver = async () => {
           : typeof properties.sessionID === "string"
             ? properties.sessionID
             : undefined
+
+        if (sessionID) sessions.add(sessionID)
 
         const messageID = typeof part.messageID === "string" ? part.messageID : undefined
         const isKnownMessage = Boolean(
@@ -169,7 +292,10 @@ export const GramsReceiver = async () => {
 
       if (kind === "session.idle") {
         const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : undefined
-        if (sessionID) await flushSession(sessionID)
+        if (sessionID) {
+          sessions.add(sessionID)
+          await flushSession(sessionID)
+        }
         return
       }
 
@@ -188,6 +314,7 @@ export const GramsReceiver = async () => {
       output: Record<string, unknown>,
     ) => {
       await emit(normalize("tool.execute.before", { input, output }, "TOOL_CALL_FINAL"))
+      if (typeof input.sessionID === "string") sessions.add(input.sessionID)
     },
 
     "tool.execute.after": async (
@@ -195,6 +322,7 @@ export const GramsReceiver = async () => {
       output: Record<string, unknown>,
     ) => {
       await emit(normalize("tool.execute.after", { input, output }, "TOOL_RESULT_FINAL"))
+      if (typeof input.sessionID === "string") sessions.add(input.sessionID)
     },
   }
 }

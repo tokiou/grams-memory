@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-version="1.18.22"
+version="1.18.31"
 cache_dir="$repo_root/.cache/opencode/$version/linux-x64"
 binary="$cache_dir/opencode"
 archive_url="https://github.com/anomalyco/opencode/releases/download/v$version/opencode-linux-x64.tar.gz"
