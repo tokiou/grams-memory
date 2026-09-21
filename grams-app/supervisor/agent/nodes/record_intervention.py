@@ -11,8 +11,10 @@ def make_record_intervention(memory):
         if not isinstance(message, str) or not message:
             raise ValueError("delivered intervention message is required for audit")
         intervention = state.get("intervention_result", {})
-        if intervention.get("delivered") is not True:
-            raise RuntimeError("cannot record an intervention that was not delivered")
+        if intervention.get("delivered") is not True and intervention.get("delivery_status") not in {
+            "PENDING", "CLAIMED",
+        }:
+            raise RuntimeError("cannot record an intervention that was not delivered or queued")
         if intervention.get("audit_recorded") and intervention.get("audit_memory_id"):
             return {"intervention_result": intervention}
         result = await memory.create({

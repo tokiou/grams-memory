@@ -13,10 +13,6 @@ from supervisor.observability import elapsed_ms, emit, monotonic_ns
 
 logger = logging.getLogger(__name__)
 
-JSON_MAX_OUTPUT_TOKENS = 4096
-TEXT_MAX_OUTPUT_TOKENS = 512
-
-
 class OpenRouterClient:
     """Small async OpenAI-compatible client for text generation."""
 
@@ -57,11 +53,10 @@ class OpenRouterClient:
         }
         if response_format is not None:
             payload["response_format"] = response_format
-        if max_tokens is None:
-            max_tokens = JSON_MAX_OUTPUT_TOKENS
-        if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or not 0 < max_tokens <= JSON_MAX_OUTPUT_TOKENS:
-            raise ValueError(f"max_tokens must be an integer from 1 to {JSON_MAX_OUTPUT_TOKENS}")
-        payload["max_tokens"] = max_tokens
+        if max_tokens is not None:
+            if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens <= 0:
+                raise ValueError("max_tokens must be a positive integer")
+            payload["max_tokens"] = max_tokens
         payload["reasoning"] = {"enabled": False}
         started = monotonic_ns()
         emit(logger, logging.INFO, "model_call_started", service="openrouter", model=selected_model,
@@ -116,7 +111,6 @@ class OpenRouterClient:
                 "type": "json_schema",
                 "json_schema": {"name": operation.lower(), "strict": True, "schema": schema},
             },
-            max_tokens=JSON_MAX_OUTPUT_TOKENS,
         )
         try:
             value = json.loads(self._content(body))
@@ -139,7 +133,6 @@ class OpenRouterClient:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=True, sort_keys=True)},
             ],
             operation=operation,
-            max_tokens=TEXT_MAX_OUTPUT_TOKENS,
         )
         return self._content(body).strip()
 

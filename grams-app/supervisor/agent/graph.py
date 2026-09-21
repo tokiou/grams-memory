@@ -3,6 +3,7 @@
 from langgraph.graph import END, START, StateGraph
 
 from supervisor.agent.nodes.apply_memory_update import make_apply_memory_update
+from supervisor.agent.nodes.assess_agent_health import make_assess_agent_health
 from supervisor.agent.nodes.assess_process_continuity import make_assess_process_continuity
 from supervisor.agent.nodes.build_intervention import make_build_intervention
 from supervisor.agent.nodes.close_current_process import make_close_current_process
@@ -28,6 +29,8 @@ def build_graph(
     jev,
     openrouter,
     opencode,
+    interventions=None,
+    intervention_fallback="system_transform",
     process_service=None,
     batch_size=20,
     run_id=None,
@@ -46,6 +49,7 @@ def build_graph(
 
     graph = StateGraph(SupervisorState)
     graph.add_node("READ_INBOX", make_read_inbox(inbox, batch_size=batch_size, run_id=run_id))
+    graph.add_node("ASSESS_AGENT_HEALTH", make_assess_agent_health())
     graph.add_node("ENSURE_ACTIVE_PROCESS", make_ensure_active_process(process_service))
     graph.add_node("LOAD_PROCESS_CONTEXT", make_load_process_context(memory))
     graph.add_node("ASSESS_PROCESS_CONTINUITY", make_assess_process_continuity(jev))
@@ -57,7 +61,15 @@ def build_graph(
     graph.add_node("CLOSE_CURRENT_PROCESS", make_close_current_process(process_service, memory))
     graph.add_node("START_NEW_PROCESS", make_start_new_process(process_service))
     graph.add_node("BUILD_INTERVENTION", make_build_intervention(openrouter))
-    graph.add_node("SEND_INTERVENTION", make_send_intervention(opencode, memory))
+    graph.add_node(
+        "SEND_INTERVENTION",
+        make_send_intervention(
+            opencode,
+            memory,
+            pending_interventions=interventions,
+            fallback_mode=intervention_fallback,
+        ),
+    )
     graph.add_node("RECORD_INTERVENTION", make_record_intervention(memory))
     graph.add_node("FINALIZE", make_finalize_cycle(inbox))
 
@@ -65,7 +77,12 @@ def build_graph(
     graph.add_conditional_edges(
         "READ_INBOX",
         lambda state: "events" if state.get("claimed_events") else "empty",
-        {"events": "ENSURE_ACTIVE_PROCESS", "empty": END},
+        {"events": "ASSESS_AGENT_HEALTH", "empty": END},
+    )
+    graph.add_conditional_edges(
+        "ASSESS_AGENT_HEALTH",
+        lambda state: state.get("health_route", "normal"),
+        {"heartbeat": "FINALIZE", "recover": "SEND_INTERVENTION", "normal": "ENSURE_ACTIVE_PROCESS"},
     )
     graph.add_conditional_edges(
         "ENSURE_ACTIVE_PROCESS",

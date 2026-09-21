@@ -64,6 +64,7 @@ class SupervisorState(TypedDict, total=False):
     intervention_message: str
     acknowledged_event_ids: list[str]
     final_status: str
+    health_route: str
 
     # Non-semantic operational diagnostics.
     cycle_errors: list[dict[str, Any]]

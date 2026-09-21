@@ -1,4 +1,5 @@
 import os
+import inspect
 import signal
 import subprocess
 import sys
@@ -20,6 +21,12 @@ def test_supervisor_abort_is_not_classified_as_agent_failure():
     assert agent._error_messages() == ["real failure"]
 
 
+def test_install_includes_git_for_opencode_snapshot_vcs():
+    source = inspect.getsource(GramsOpenCode.install)
+
+    assert "apt-get install -y curl ca-certificates git" in source
+
+
 def test_aborted_wrapper_keeps_server_for_follow_up_prompt():
     wrapper = GramsOpenCode._opencode_wrapper()
 
@@ -29,6 +36,13 @@ def test_aborted_wrapper_keeps_server_for_follow_up_prompt():
     assert 'GRAMS_EVENT_ENDPOINT:-' in wrapper
     assert "GRAMS_FOLLOW_UP_GRACE_SECONDS" in wrapper
     assert "follow-up prompt" in wrapper
+
+
+def test_install_configures_pending_intervention_endpoint():
+    source = inspect.getsource(GramsOpenCode.install)
+
+    assert "GRAMS_INTERVENTION_ENDPOINT" in source
+    assert "INTERVENTION_ENDPOINT" in source
 
 
 def test_aborted_wrapper_keeps_fake_server_alive(tmp_path):

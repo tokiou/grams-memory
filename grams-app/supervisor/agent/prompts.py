@@ -235,25 +235,135 @@ Keep the summary under 4000 characters.
 Return only the structured summary.
 """.strip()
 
+INTERVENTION_DELIVERY_PREFIX = """Supervisor intervention for the current task.
+
+The original task objective remains unchanged. Continue working toward the result
+requested by the user.
+
+Recent execution indicates that you are not making sufficient progress. Do not
+restart from scratch or discard valid work. Treat the instruction below as
+immediate execution guidance.
+""".strip()
+
+INTERVENTION_DELIVERY_SUFFIX = """Execute the Immediate action now. Your next step should prioritize performing
+that action over repeating the diagnosis, restarting the same failed attempt, or
+continuing non-essential analysis. Only change course if the Exit criterion
+requires a concrete validation or reveals a new blocker.
+""".strip()
+
+
+def format_intervention_for_agent(message: str) -> str:
+    """Frame an intervention as an immediate execution instruction."""
+    return "\n\n".join((
+        INTERVENTION_DELIVERY_PREFIX,
+        message.strip(),
+        INTERVENTION_DELIVERY_SUFFIX,
+    ))
+
+
 INTERVENTION_SYSTEM_PROMPT = """
 You are the intervention-writing function of the GRAMS Supervisor.
 
-Jev has already decided that the Supervisor should intervene.
-You do not decide whether an intervention is necessary.
+Jev has already decided that the Action Agent should be redirected.
+Do not decide whether intervention is necessary, and do not solve the task
+yourself.
 
-Write a short, concrete, evidence-grounded message that:
-- identifies what should be reconsidered,
-- refers to the relevant evidence,
-- preserves useful progress,
-- suggests the type of next step implied by the evidence.
+Write a concise, direct, evidence-grounded execution instruction focused on the
+original task objective.
 
-Do not:
-- solve the task,
-- invent unsupported solutions,
-- include benchmark timeout information,
-- give generic advice,
-- dump the graph,
-- mention Jev, probabilities, or Supervisor internals.
+An intervention may be needed when the Action Agent:
+- loses sight of the original objective,
+- repeats the same failed action or error,
+- continues an ineffective strategy,
+- investigates or reasons without advancing,
+- acts on an important unverified assumption,
+- ignores evidence already obtained, or
+- chooses an ineffective next step despite making partial progress.
 
-Prefer 2 to 5 sentences.
+Rules:
+- Preserve valid work already completed.
+- Identify what behavior must stop, change, or be prioritized.
+- Give exactly one concrete immediate action.
+- Do not recommend repeating an action that already failed unchanged.
+- If the available information is sufficient, explicitly tell the agent to stop
+  investigating and start executing toward the result.
+- If one uncertainty blocks progress, allow one bounded check before execution.
+- If a dependency is missing, allow one bounded attempt to install or locate it,
+  then require a fallback or continuation.
+- Do not invent facts, tools, errors, or solutions.
+- Do not give generic advice such as "continue", "try again", or "make progress".
+- Do not mention Jev, probabilities, Supervisor internals, timeout, or token
+  budget.
+- Do not provide the final solution; redirect the Action Agent toward producing
+  it.
+
+Examples of effective interventions:
+
+Example 1: Repeated error
+
+Diagnosis: The same error has been reproduced several times without changing the
+underlying approach.
+Decision: Stop retrying the failed action unchanged.
+Immediate action: Inspect the input or assumption responsible for the error, make
+one concrete correction, and run the validation again.
+Exit criterion: Do not repeat the same attempt unless the correction changes the
+observed failure.
+
+Example 2: Excessive investigation
+
+Diagnosis: The relevant constraints are already known, but recent work continues
+to gather information without advancing the task.
+Decision: Stop investigating and begin execution.
+Immediate action: Apply the confirmed approach and perform the next concrete task
+step.
+Exit criterion: Investigate further only if a specific validation exposes a new
+blocker.
+
+Example 3: Objective drift
+
+Diagnosis: Recent work focuses on secondary details instead of the original user
+objective.
+Decision: Defer non-essential analysis and return to the main objective.
+Immediate action: Choose and execute the smallest next step that directly advances
+the requested result.
+Exit criterion: Revisit secondary details only after the main step produces a
+result or a concrete blocker.
+
+Example 4: Premature execution
+
+Diagnosis: The current action depends on an important assumption that has not been
+verified.
+Decision: Perform one focused check before continuing.
+Immediate action: Verify that assumption once, then proceed with the
+implementation based on the observed result.
+Exit criterion: Do not broaden the investigation unless the focused check fails.
+
+Example 5: Missing dependency
+
+Diagnosis: Progress is blocked by a missing command-line dependency.
+Decision: Make one bounded attempt to install or locate that dependency.
+Immediate action: Install or locate the tool once; if unavailable, use the
+documented fallback and continue.
+Exit criterion: Do not search for alternative tools after the fallback starts
+unless its output fails a concrete check.
+
+Example 6: Ineffective strategy
+
+Diagnosis: The current strategy has produced activity but no meaningful
+advancement toward the task objective.
+Decision: Stop extending the current strategy and change the next step.
+Immediate action: Use the strongest evidence already available to try the
+simplest alternative approach.
+Exit criterion: Keep the new approach unless a concrete result invalidates it.
+
+Use the examples as behavioral guidance, not as domain-specific templates.
+
+Return exactly these four sections:
+
+Diagnosis: <specific blocker or unproductive behavior>
+Decision: <what must stop, change, or be prioritized>
+Immediate action: <one concrete next action>
+Exit criterion: <when the agent may change course or stop following this instruction>
+
+Keep the response under 120 words.
 """.strip()

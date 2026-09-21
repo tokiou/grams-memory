@@ -15,8 +15,9 @@ class OpenCodeInfrastructureError(NonZeroAgentExitCodeError):
 class GramsOpenCode(OpenCode):
     """OpenCode adapter using a host-prepared, pinned binary artifact."""
 
-    OPENCODE_VERSION = "1.18.22"
+    OPENCODE_VERSION = "1.18.31"
     EVENT_ENDPOINT = "http://host.docker.internal:8765/events"
+    INTERVENTION_ENDPOINT = "http://host.docker.internal:8765/interventions"
     CACHE_PATH = "/opt/grams-opencode-cache/opencode"
     ERROR_PATTERNS = [
         ErrorPattern(r"GRAMS_OPENCODE_CACHE_MISSING|GRAMS_OPENCODE_VERSION_MISMATCH", OpenCodeInfrastructureError),
@@ -74,6 +75,74 @@ if [[ "$ready" != "1" ]]; then
 fi
 printf 'OpenCode server health check passed\\n' >>"$wrapper_log"
 
+# OpenCode can log fatal session errors without emitting a plugin event.
+internal_log=/logs/agent/opencode/xdg-data/opencode/log/opencode.log
+python3 - "${GRAMS_EVENT_ENDPOINT:-}" "$internal_log" "$server_pid" <<'PY' >/logs/agent/opencode-health.log 2>&1 &
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import urllib.request
+
+endpoint, path, server_pid = sys.argv[1:]
+session_id = None
+reported = set()
+session_pattern = re.compile(r"ses_[A-Za-z0-9]+")
+error_text = 'Expected a string starting with "ses", got "default"'
+
+def emit_error(payload):
+    body = {
+        "schema_version": 1,
+        "type": "SESSION_INTERNAL_ERROR",
+        "source_event": "opencode.internal_monitor",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "session_id": session_id,
+        "root_session_id": session_id,
+        "payload": payload,
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5):
+        pass
+
+while True:
+    try:
+        os.kill(int(server_pid), 0)
+    except OSError:
+        break
+    try:
+        with open(path, encoding="utf-8", errors="replace") as log:
+            content = log.read()
+    except FileNotFoundError:
+        content = ""
+    matches = session_pattern.findall(content)
+    if matches:
+        session_id = matches[-1]
+    if error_text in content and session_id:
+        fingerprint = hashlib.sha256(f"{session_id}:{error_text}".encode()).hexdigest()
+        if fingerprint not in reported:
+            reported.add(fingerprint)
+            try:
+                emit_error({
+                    "error_code": "INVALID_SESSION_ID",
+                    "fatal": True,
+                    "message": error_text,
+                    "fingerprint": fingerprint,
+                    "active_tool_call_id": None,
+                })
+                print(f"reported {fingerprint}", flush=True)
+            except Exception as error:
+                print(f"health event failed: {error}", flush=True)
+    time.sleep(1)
+PY
+health_monitor_pid=$!
+
 args=()
 attached=0
 for arg in "$@"; do
@@ -93,6 +162,7 @@ if [[ -n "${GRAMS_EVENT_ENDPOINT:-}" ]]; then
   sleep "${GRAMS_FOLLOW_UP_GRACE_SECONDS:-90}"
 fi
 kill "$server_pid" 2>/dev/null || true
+kill "$health_monitor_pid" 2>/dev/null || true
 trap - EXIT
 exit "$status"
 '''
@@ -100,14 +170,20 @@ exit "$status"
     async def install(self, environment: BaseEnvironment) -> None:
         await self.exec_as_root(
             environment,
-            command="apt-get update && apt-get install -y curl ca-certificates",
+            command="apt-get update && apt-get install -y curl ca-certificates git",
             env={"DEBIAN_FRONTEND": "noninteractive"},
         )
 
         wrapper = base64.b64encode(self._opencode_wrapper().encode()).decode()
         endpoint = os.environ.get("GRAMS_EVENT_ENDPOINT", self.EVENT_ENDPOINT)
+        intervention_endpoint = os.environ.get(
+            "GRAMS_INTERVENTION_ENDPOINT", self.INTERVENTION_ENDPOINT,
+        )
         path_line = 'export PATH="$HOME/.opencode/bin:$PATH"'
-        endpoint_line = f"export GRAMS_EVENT_ENDPOINT={endpoint}"
+        endpoint_line = f"export GRAMS_EVENT_ENDPOINT={shlex.quote(endpoint)}"
+        intervention_endpoint_line = (
+            f"export GRAMS_INTERVENTION_ENDPOINT={shlex.quote(intervention_endpoint)}"
+        )
         plugin = base64.b64encode(self._plugin_source().encode()).decode()
         command = (
             "set -euo pipefail; "
@@ -130,6 +206,8 @@ exit "$status"
             ' > "$HOME/.nvm/nvm.sh"; '
             'if [[ "${GRAMS_MODE:-on}" != "off" ]]; then '
             f"printf '%s\\n' {shlex.quote(endpoint_line)}"
+            ' >> "$HOME/.nvm/nvm.sh"; '
+            f"printf '%s\\n' {shlex.quote(intervention_endpoint_line)}"
             ' >> "$HOME/.nvm/nvm.sh"; '
             'fi; '
             '. "$HOME/.nvm/nvm.sh"; '
