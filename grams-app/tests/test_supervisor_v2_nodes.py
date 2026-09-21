@@ -18,6 +18,7 @@ from supervisor.agent.nodes.record_intervention import make_record_intervention
 from supervisor.agent.nodes.send_intervention import make_send_intervention
 from supervisor.agent.nodes.supervision_decision import make_supervision_decision
 from supervisor.agent.graph import build_graph
+from supervisor.agent.prompts import format_intervention_for_agent
 from supervisor.agent.runtime import SupervisorRuntime
 from supervisor.agent.services.openrouter_service import OpenRouterClient
 from supervisor.agent.schemas import validate_memory_proposal, validate_summary
@@ -72,7 +73,7 @@ def test_openrouter_uses_json_serialization_and_json_schema_response_format():
         assert value == {"content": "summary"}
         assert text == "plain text"
         assert requests[0]["messages"][1]["content"] == '{"a": 1, "b": 2}'
-        assert requests[0]["max_tokens"] == 4096
+        assert "max_tokens" not in requests[0]
         assert requests[0]["reasoning"] == {"enabled": False}
         assert requests[0]["response_format"] == {
             "type": "json_schema",
@@ -83,13 +84,13 @@ def test_openrouter_uses_json_serialization_and_json_schema_response_format():
             },
         }
         assert "response_format" not in requests[1]
-        assert requests[1]["max_tokens"] == 512
+        assert "max_tokens" not in requests[1]
         assert requests[1]["reasoning"] == {"enabled": False}
 
     asyncio.run(scenario())
 
 
-def test_openrouter_chat_applies_a_default_cap_and_rejects_oversized_caps():
+def test_openrouter_chat_omits_default_cap_and_accepts_explicit_positive_caps():
     async def scenario():
         requests = []
 
@@ -100,11 +101,11 @@ def test_openrouter_chat_applies_a_default_cap_and_rejects_oversized_caps():
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         client = OpenRouterClient(api_key="test-key", model="test-model", http=http)
         await client.chat([{"role": "user", "content": "x"}])
-        with pytest.raises(ValueError, match="max_tokens"):
-            await client.chat([{"role": "user", "content": "x"}], max_tokens=4097)
+        await client.chat([{"role": "user", "content": "x"}], max_tokens=8192)
         await http.aclose()
 
-        assert requests[0]["max_tokens"] == 4096
+        assert "max_tokens" not in requests[0]
+        assert requests[1]["max_tokens"] == 8192
         assert requests[0]["reasoning"] == {"enabled": False}
 
     asyncio.run(scenario())
@@ -568,10 +569,14 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
         state.update(await make_build_intervention(Generator())(state))
         memory = Memory()
         opencode = OpenCode()
-        state.update(await make_send_intervention(opencode, memory)(state))
+        state.update(await make_send_intervention(opencode, memory, fallback_mode="prompt_async")(state))
         state.update(await make_record_intervention(memory)(state))
         assert state["intervention_result"]["audit_memory_id"] == "audit-1"
-        assert opencode.calls == [("send", "session-1", "Run the focused validation.")]
+        assert opencode.calls == [(
+            "send",
+            "session-1",
+            format_intervention_for_agent("Run the focused validation."),
+        )]
 
     asyncio.run(scenario())
 

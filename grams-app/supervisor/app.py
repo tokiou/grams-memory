@@ -7,12 +7,13 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from supervisor.api import register_event_routes
+from supervisor.api import register_event_routes, register_intervention_routes
 from supervisor.agent.runtime import build_runtime
 from supervisor.agent.services import JevClient, OpenRouterClient
 from supervisor.agent.worker import SupervisorWorker
 from supervisor.config import Config
 from supervisor.inbox import EventInbox, InboxRepository
+from supervisor.interventions import PendingInterventionRepository
 from supervisor.memory.client import MCPMemoryClient
 from supervisor.opencode.client import OpenCodeClient
 from supervisor.platform.sqlite.db import open_connection
@@ -32,6 +33,10 @@ def create_app(
         emit(logger, logging.INFO, "supervisor_startup", status="starting", log_level=settings.log_level.upper(), log_color=settings.log_color)
         connection = await open_connection(settings.db_path)
         repository = InboxRepository(connection, max_attempts=settings.max_attempts)
+        interventions = PendingInterventionRepository(
+            connection,
+            claim_lease_seconds=settings.intervention_claim_lease_seconds,
+        )
         inbox = EventInbox(
             repository,
             batch_size=settings.inbox_batch_size,
@@ -46,9 +51,11 @@ def create_app(
         opencode = None
         try:
             await inbox.initialize()
+            await interventions.initialize()
             app.state.config = settings
             app.state.connection = connection
             app.state.repository = repository
+            app.state.interventions = interventions
             app.state.inbox = inbox
             app.state.accepting = True
             if settings.worker_enabled:
@@ -62,6 +69,8 @@ def create_app(
                     jev=jev,
                     openrouter=openrouter,
                     opencode=opencode,
+                    interventions=interventions,
+                    intervention_fallback=settings.intervention_fallback,
                     batch_size=settings.inbox_batch_size,
                 )
                 worker = SupervisorWorker(
@@ -109,6 +118,7 @@ def create_app(
 
     app = FastAPI(redirect_slashes=False, lifespan=lifespan)
     register_event_routes(app)
+    register_intervention_routes(app)
     return app
 
 

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from supervisor.agent.nodes.send_intervention import make_send_intervention
 from supervisor.agent.nodes.record_intervention import make_record_intervention
 from supervisor.agent.nodes.common import cycle_key
+from supervisor.agent.prompts import format_intervention_for_agent
 from supervisor.agent.nodes.expand_graph import make_expand_graph
 from supervisor.agent.runtime import SupervisorRuntime
 from supervisor.agent.services.process_service import ProcessService
@@ -145,14 +146,15 @@ def test_intervention_retry_reconciles_ambiguous_delivery_without_resending():
         }
         memory = Memory()
         opencode = OpenCode()
-        node = make_send_intervention(opencode, memory)
+        formatted_message = format_intervention_for_agent("Reconsider the failed strategy.")
+        node = make_send_intervention(opencode, memory, fallback_mode="prompt_async")
         with pytest.raises(RuntimeError, match="response lost"):
             await node(state)
         retry_state = {**state, "intervention_message": "A newly generated message."}
         result = await node(retry_state)
         assert len(opencode.messages) == 1
         assert result["intervention_result"]["delivered"] is True
-        assert result["intervention_result"]["message"] == "Reconsider the failed strategy."
+        assert result["intervention_result"]["message"] == formatted_message
         assert memory.record["content"].startswith("DELIVERED\n")
         assert "newly generated" not in memory.record["content"]
 
@@ -195,7 +197,7 @@ def test_ambiguous_invisible_intervention_is_not_resent():
         }
         memory = Memory()
         opencode = OpenCode()
-        node = make_send_intervention(opencode, memory)
+        node = make_send_intervention(opencode, memory, fallback_mode="prompt_async")
         with pytest.raises(RuntimeError, match="response lost"):
             await node(state)
         result = await node(state)
@@ -235,13 +237,14 @@ def test_rejected_prompt_is_durable_and_not_reclassified_as_unknown():
             "process_context": {"key": {"evidence_category_id": "evidence"}},
         }
         memory = Memory()
-        node = make_send_intervention(OpenCode(), memory)
+        node = make_send_intervention(OpenCode(), memory, fallback_mode="prompt_async")
+        formatted_message = format_intervention_for_agent("Implement now.")
         with pytest.raises(httpx.HTTPStatusError, match="prompt rejected"):
             await node(state)
-        assert memory.record["content"] == "SENDING\nImplement now."
+        assert memory.record["content"] == f"SENDING\n{formatted_message}"
         result = await node(state)
         assert result["intervention_result"]["delivery_status"] == "UNKNOWN"
-        assert memory.record["content"] == "DELIVERY_UNKNOWN\nImplement now."
+        assert memory.record["content"] == f"DELIVERY_UNKNOWN\n{formatted_message}"
 
     asyncio.run(scenario())
 

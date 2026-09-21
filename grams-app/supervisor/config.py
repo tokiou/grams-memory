@@ -61,6 +61,8 @@ class Config:
     worker_poll_seconds: float = 0.25
     memory_mcp_url: str = "http://127.0.0.1:8080"
     opencode_base_url: str = "http://127.0.0.1:4096"
+    intervention_claim_lease_seconds: float = 60.0
+    intervention_fallback: str = "system_transform"
 
     def __post_init__(self) -> None:
         if not str(self.db_path).strip():
@@ -82,6 +84,10 @@ class Config:
             raise ValueError("log_lag_warn_ms must be finite and non-negative")
         if self.worker_poll_seconds <= 0 or not math.isfinite(self.worker_poll_seconds):
             raise ValueError("worker poll interval must be positive and finite")
+        if self.intervention_claim_lease_seconds <= 0 or not math.isfinite(self.intervention_claim_lease_seconds):
+            raise ValueError("intervention claim lease must be positive and finite")
+        if self.intervention_fallback not in {"system_transform", "prompt_async"}:
+            raise ValueError("intervention_fallback must be system_transform or prompt_async")
         if not self.memory_mcp_url.strip() or not self.opencode_base_url.strip():
             raise ValueError("external service URLs must not be empty")
 
@@ -111,4 +117,6 @@ class Config:
             worker_poll_seconds=_positive_float("GRAMS_SUPERVISOR_WORKER_POLL_SECONDS", 0.25),
             memory_mcp_url=os.getenv("GRAMS_MCP_URL", "http://127.0.0.1:8080"),
             opencode_base_url=os.getenv("OPENCODE_BASE_URL", "http://127.0.0.1:4096"),
+            intervention_claim_lease_seconds=_positive_float("GRAMS_INTERVENTION_CLAIM_LEASE_SECONDS", 60.0),
+            intervention_fallback=os.getenv("GRAMS_INTERVENTION_FALLBACK", "system_transform").strip().lower(),
         )
