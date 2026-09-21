@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import logging
 from typing import Any
@@ -35,6 +36,18 @@ def _message_from_audit(value: Any) -> str | None:
     return message or None
 
 
+def _audit_description(state: dict[str, Any]) -> str:
+    decision = state.get("supervision_decision") or {}
+    value = {
+        "version": 1,
+        "action": decision.get("action"),
+        "action_confidence": decision.get("action_confidence"),
+        "evidence_memory_ids": decision.get("evidence_memory_ids") or [],
+        "reason_codes": decision.get("reason_codes") or [],
+    }
+    return "GRAMS_INTERVENTION_V1:" + json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+
 def make_send_intervention(
     opencode,
     memory,
@@ -55,6 +68,7 @@ def make_send_intervention(
 
         marker = cycle_key(state)
         title = f"Supervisor intervention [{marker}]"
+        description = _audit_description(state)
         existing = await memory.search(category_id=category_id, query=marker, limit=10)
         audit = next((item for item in existing if str(_field(item, "title") or "") == title), None)
         durable_message = (
@@ -82,6 +96,7 @@ def make_send_intervention(
                     "category_id": category_id,
                     "title": title,
                     "content": _content("PREPARED", durable_message),
+                    "description": description,
                     "source": "supervisor",
                 })
             audit_id = _field(audit, "id")
@@ -114,6 +129,7 @@ def make_send_intervention(
                     await memory.update(str(audit_id), {
                         "title": title,
                         "content": _content("DELIVERED", durable_message),
+                        "description": description,
                         "source": "supervisor",
                     })
                     return {"intervention_result": {
@@ -129,6 +145,7 @@ def make_send_intervention(
                 await memory.update(str(audit_id), {
                     "title": title,
                     "content": _content("DELIVERY_UNKNOWN", durable_message),
+                    "description": description,
                     "source": "supervisor",
                 })
                 return {"intervention_result": {
@@ -144,12 +161,14 @@ def make_send_intervention(
             await memory.update(str(audit_id), {
                 "title": title,
                 "content": _content("SENDING", durable_message),
+                "description": description,
                 "source": "supervisor",
             })
             response = await opencode.send_message(session_id, durable_message)
             await memory.update(str(audit_id), {
                 "title": title,
                 "content": _content("DELIVERED", durable_message),
+                "description": description,
                 "source": "supervisor",
             })
             return {"intervention_result": {
@@ -257,6 +276,7 @@ def make_send_intervention(
                 "category_id": category_id,
                 "title": title,
                 "content": _content(delivery_status, durable_message),
+                "description": description,
                 "source": "supervisor",
             })
         else:
@@ -266,6 +286,7 @@ def make_send_intervention(
             await memory.update(str(audit_id), {
                 "title": title,
                 "content": _content(delivery_status, durable_message),
+                "description": description,
                 "source": "supervisor",
             })
 

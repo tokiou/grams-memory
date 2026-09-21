@@ -7,6 +7,7 @@ from typing import Any
 from supervisor.agent.nodes.common import answers, jev_call, noul_value, typed_answer
 from supervisor.agent.prompts import (
     CONTEXT_SUFFICIENT_INSTRUCTIONS,
+    INTERVENTION_REASON_CRITERIA,
     PROGRESS_STALL_INSTRUCTIONS,
     PROCESS_OUTCOME_CRITERIA,
     PROCESS_OUTCOME_INSTRUCTIONS,
@@ -14,13 +15,83 @@ from supervisor.agent.prompts import (
     SUPERVISION_ACTION_CRITERIA,
     SUPERVISION_ACTION_INSTRUCTIONS,
 )
-from supervisor.agent.schemas import RELATION_TYPES, validate_supervision_decision
+from supervisor.agent.schemas import REASON_CODES, RELATION_TYPES, validate_supervision_decision
 from supervisor.agent.state_builder import build_jev_process_state
 from supervisor.memory.client import _field
 from supervisor.observability import emit
 
 logger = logging.getLogger(__name__)
 ACTIONS = ["CONTINUE", "NEED_MORE_MEMORY", "INTERVENE", "CLOSE_PROCESS"]
+
+
+def _intervention_evidence(state: dict[str, Any], base: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    context = state.get("process_context") or {}
+    category_id = (context.get("category_ids") or {}).get("EVIDENCE")
+    evidence: dict[str, dict[str, Any]] = {}
+    for item in base.get("evidence") or []:
+        memory_id = item.get("id")
+        if memory_id and (category_id is None or str(item.get("category_id")) == str(category_id)):
+            evidence[str(memory_id)] = item
+    expanded = ((base.get("expanded_memory") or {}).get("memories") or {})
+    if category_id is not None:
+        for item in expanded.values():
+            memory_id = item.get("id")
+            if memory_id and str(item.get("category_id")) == str(category_id):
+                evidence.setdefault(str(memory_id), item)
+    return evidence
+
+
+async def _select_intervention_evidence(
+    jev,
+    state: dict[str, Any],
+    base: dict[str, Any],
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    evidence = _intervention_evidence(state, base)
+    if not evidence:
+        raise RuntimeError("INTERVENE requires at least one in-scope EVIDENCE memory")
+    evidence_criteria = {
+        memory_id: f"{item.get('title', 'Evidence')}: {item.get('content', '')}"[:500]
+        for memory_id, item in evidence.items()
+    }
+    evidence_criteria["NONE"] = "Do not select another evidence memory."
+    questions = {
+        f"evidence_memory_{index}": {
+            "type": "choice",
+            "criteria": evidence_criteria,
+            "instructions": "Select a distinct EVIDENCE memory that directly supports the intervention decision.",
+        }
+        for index in range(1, 4)
+    }
+    questions.update({
+        f"intervention_reason_{index}": {
+            "type": "choice",
+            "criteria": {**INTERVENTION_REASON_CRITERIA, "NONE": "Do not select another reason."},
+            "instructions": "Select a controlled explanation for the intervention decision.",
+        }
+        for index in range(1, 3)
+    })
+    selected_answers = answers(await jev_call(
+        jev,
+        {**base, "intervention_evidence": list(evidence.values())},
+        questions,
+    ))
+    evidence_ids: list[str] = []
+    for index in range(1, 4):
+        selected = typed_answer(selected_answers.get(f"evidence_memory_{index}"))["value"]
+        if selected != "NONE":
+            if selected not in evidence or selected in evidence_ids:
+                raise ValueError("Jev selected an invalid or duplicate intervention evidence memory")
+            evidence_ids.append(selected)
+    reasons: list[str] = []
+    for index in range(1, 3):
+        selected = typed_answer(selected_answers.get(f"intervention_reason_{index}"))["value"]
+        if selected != "NONE":
+            if selected not in REASON_CODES or selected in reasons:
+                raise ValueError("Jev selected an invalid or duplicate intervention reason")
+            reasons.append(selected)
+    if not evidence_ids or not reasons:
+        raise ValueError("INTERVENE requires selected evidence and reason codes")
+    return evidence_ids, reasons, [evidence[memory_id] for memory_id in evidence_ids]
 
 
 def _expansion_targets(state: dict[str, Any]) -> dict[str, Any]:
@@ -137,6 +208,15 @@ def make_supervision_decision(
                     threshold=outcome_threshold,
                 )
                 selected = "CONTINUE"
+        intervention_evidence_ids: list[str] = []
+        intervention_reason_codes: list[str] = []
+        selected_intervention_memories: list[dict[str, Any]] = []
+        if selected == "INTERVENE":
+            (
+                intervention_evidence_ids,
+                intervention_reason_codes,
+                selected_intervention_memories,
+            ) = await _select_intervention_evidence(jev, state, base)
         decision: dict[str, Any] = {
             **diagnostics,
             "action": selected,
@@ -149,6 +229,9 @@ def make_supervision_decision(
             decision["process_outcome"] = outcome_answer["value"]
             decision["process_outcome_probabilities"] = outcome_answer["probabilities"]
             decision["process_outcome_confidence"] = outcome_answer["confidence"]
+        elif selected == "INTERVENE":
+            decision["evidence_memory_ids"] = intervention_evidence_ids
+            decision["reason_codes"] = intervention_reason_codes
         decision = validate_supervision_decision(decision)
         emit(
             logger,
@@ -162,8 +245,14 @@ def make_supervision_decision(
             process_outcome=decision.get("process_outcome"),
             process_outcome_probabilities=decision.get("process_outcome_probabilities"),
             process_outcome_confidence=decision.get("process_outcome_confidence"),
+            evidence_memory_ids=decision.get("evidence_memory_ids"),
+            reason_codes=decision.get("reason_codes"),
             expansion_depth=state.get("memory_expansion_depth", 0),
         )
-        return {"supervision_diagnostics": diagnostics, "supervision_decision": decision}
+        return {
+            "supervision_diagnostics": diagnostics,
+            "supervision_decision": decision,
+            "selected_intervention_memories": selected_intervention_memories,
+        }
 
     return node

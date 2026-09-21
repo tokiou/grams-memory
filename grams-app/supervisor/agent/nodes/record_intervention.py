@@ -1,6 +1,20 @@
 from __future__ import annotations
 
+import json
+
 from supervisor.memory.client import _field
+
+
+def _audit_description(state):
+    decision = state.get("supervision_decision") or {}
+    value = {
+        "version": 1,
+        "action": decision.get("action"),
+        "action_confidence": decision.get("action_confidence"),
+        "evidence_memory_ids": decision.get("evidence_memory_ids") or [],
+        "reason_codes": decision.get("reason_codes") or [],
+    }
+    return "GRAMS_INTERVENTION_V1:" + json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
 
 def make_record_intervention(memory):
     async def node(state):
@@ -21,6 +35,7 @@ def make_record_intervention(memory):
             "category_id": category_id,
             "title": "Supervisor intervention",
             "content": message,
+            "description": _audit_description(state),
             "source": "supervisor",
         })
         memory_id = _field(result, "id")

@@ -48,6 +48,15 @@ def _link_metadata(relation: dict[str, Any]) -> dict[str, Any]:
 
 
 def _curation_metadata(description: str) -> tuple[Any, ...] | None:
+    value = _curation_envelope(description)
+    if value is None:
+        return None
+    return tuple(value.get(key) for key in (
+        "role", "status", "confidence", "progress_effect", "importance", "provenance",
+    ))
+
+
+def _curation_envelope(description: str) -> dict[str, Any] | None:
     envelope = next((line for line in description.splitlines() if line.startswith("GRAMS_CURATION_V1:")), None)
     if envelope is None:
         return None
@@ -57,9 +66,7 @@ def _curation_metadata(description: str) -> tuple[Any, ...] | None:
         raise RuntimeError("persisted curation envelope is invalid")
     if not isinstance(value, dict) or value.get("version") != 1:
         raise RuntimeError("persisted curation envelope has an invalid version")
-    return tuple(value.get(key) for key in (
-        "role", "status", "confidence", "progress_effect", "importance", "provenance",
-    ))
+    return value
 
 
 def make_apply_memory_update(memory):
@@ -74,6 +81,7 @@ def make_apply_memory_update(memory):
 
         existing_by_identity: dict[tuple[str, str, str], str] = {}
         existing_metadata_by_identity: dict[tuple[str, str, str], tuple[Any, ...] | None] = {}
+        existing_cycle_provenance: list[tuple[tuple[str, ...], str, tuple[str, str, str]]] = []
         cycle_refs: dict[str, tuple[str, tuple[str, str, str]]] = {}
         marker = cycle_key(state) if state.get("claimed_events") else None
         scoped_ids: set[str] = set()
@@ -94,6 +102,12 @@ def make_apply_memory_update(memory):
                 existing_by_identity[identity] = str(memory_id)
                 description = str(_field(value, "description") or "")
                 existing_metadata_by_identity[identity] = _curation_metadata(description)
+                if marker and description.startswith(f"{marker}:"):
+                    envelope = _curation_envelope(description)
+                    provenance = envelope.get("provenance") if envelope else None
+                    source_event_ids = provenance.get("source_event_ids") if isinstance(provenance, dict) else None
+                    if isinstance(source_event_ids, list) and all(isinstance(item, str) for item in source_event_ids):
+                        existing_cycle_provenance.append((tuple(sorted(source_event_ids)), str(memory_id), identity))
                 if marker and description.startswith(f"{marker}:"):
                     identity = _identity(
                         category,
@@ -140,6 +154,11 @@ def make_apply_memory_update(memory):
                             cycle_refs[candidate_ref] = (str(memory_id), identity)
                     existing_by_identity[identity] = str(memory_id)
                     existing_metadata_by_identity[identity] = _curation_metadata(description)
+                    envelope = _curation_envelope(description)
+                    provenance = envelope.get("provenance") if envelope else None
+                    source_event_ids = provenance.get("source_event_ids") if isinstance(provenance, dict) else None
+                    if marker and isinstance(source_event_ids, list) and all(isinstance(item, str) for item in source_event_ids):
+                        existing_cycle_provenance.append((tuple(sorted(source_event_ids)), str(memory_id), identity))
 
         existing_relations = {
             (
@@ -161,11 +180,22 @@ def make_apply_memory_update(memory):
             metadata_identity = tuple(candidate.get(key) for key in (
                 "role", "status", "confidence", "progress_effect", "importance", "provenance",
             ))
+            if marker and any(key in candidate for key in (
+                "role", "status", "confidence", "progress_effect", "importance", "provenance",
+            )):
+                candidate_sources = candidate.get("provenance", {}).get("source_event_ids") or []
+                provenance_matches = [item for item in existing_cycle_provenance if item[0] == tuple(sorted(candidate_sources))]
+                if provenance_matches and any(item[2] != identity for item in provenance_matches):
+                    raise RuntimeError("cycle already contains a different curated materialization for this provenance")
             existing_metadata = existing_metadata_by_identity.get(identity)
             if existing_metadata is not None and any(key in candidate for key in (
                 "role", "status", "confidence", "progress_effect", "importance", "provenance",
             )) and existing_metadata != metadata_identity:
                 raise RuntimeError("existing memory has incompatible curation metadata")
+            if existing_metadata is None and any(key in candidate for key in (
+                "role", "status", "confidence", "progress_effect", "importance", "provenance",
+            )) and identity in existing_by_identity:
+                raise RuntimeError("legacy memory cannot satisfy a curated metadata proposal")
             if identity in planned_group_metadata and planned_group_metadata[identity] != metadata_identity:
                 raise RuntimeError("duplicate memory proposal has incompatible curation metadata")
             planned_group_metadata[identity] = metadata_identity
@@ -225,17 +255,19 @@ def make_apply_memory_update(memory):
         reused_ids = [target[1] for target in canonical_targets.values() if target[0] == "existing"]
         for identity, candidate in planned_groups.items():
             category_id = category_ids[candidate["category"]]
+            curated = any(key in candidate for key in (
+                "role", "status", "confidence", "progress_effect", "importance", "provenance",
+            ))
             payload = {
                 "category_id": category_id,
                 "title": candidate["title"],
                 "content": candidate["content"],
                 "source": "supervisor",
             }
-            if marker:
-                if any(key in candidate for key in ("role", "status", "confidence", "progress_effect", "importance", "provenance")):
-                    payload["description"] = _curation_description(marker, candidate, planned_group_refs[identity])
-                else:
-                    payload["description"] = f"{marker}:{','.join(planned_group_refs[identity])}"
+            if curated:
+                payload["description"] = _curation_description(marker, candidate, planned_group_refs[identity])
+            elif marker:
+                payload["description"] = f"{marker}:{','.join(planned_group_refs[identity])}"
             if candidate.get("role") is not None:
                 payload["type"] = candidate["role"]
             if candidate.get("status") is not None:
@@ -246,10 +278,18 @@ def make_apply_memory_update(memory):
             memory_id = _field(created, "id")
             if not memory_id or str(_field(created, "category_id")) != category_id:
                 raise RuntimeError("Memory MCP returned an invalid created memory")
-            for field in ("type", "status", "confidence"):
-                expected = payload.get(field)
-                if expected is not None and _field(created, field) is not None and _field(created, field) != expected:
-                    raise RuntimeError(f"Memory MCP returned incompatible curated {field}")
+            if curated:
+                expected_description = payload.get("description")
+                required_fields = ("title", "content", "description", "source", "type", "status", "confidence")
+                if any(_field(created, field) is None for field in required_fields):
+                    raise RuntimeError("Memory MCP returned an incomplete curated memory")
+                for field in required_fields:
+                    if _field(created, field) != payload.get(field):
+                        raise RuntimeError(f"Memory MCP returned incompatible curated {field}")
+                if _curation_metadata(str(expected_description)) != tuple(candidate.get(key) for key in (
+                    "role", "status", "confidence", "progress_effect", "importance", "provenance",
+                )):
+                    raise RuntimeError("Memory MCP returned an incompatible curation envelope")
             if str(memory_id) in scoped_ids:
                 raise RuntimeError("Memory MCP returned a duplicate created memory id")
             for candidate_ref, target in canonical_targets.items():
@@ -280,13 +320,27 @@ def make_apply_memory_update(memory):
             if identity in existing_relations:
                 skipped_relations.append(identity)
                 continue
-            created_relations.append(await memory.link(
+            linked = await memory.link(
                 source,
                 target,
                 relation["relation_type"],
                 source="supervisor",
                 **_link_metadata(relation),
-            ))
+            )
+            if not isinstance(linked, dict) or not _field(linked, "id"):
+                raise RuntimeError("Memory MCP returned an invalid created relation")
+            for field, expected in (("source_id", source), ("target_id", target), ("relation", relation["relation_type"])):
+                if _field(linked, field) is not None and str(_field(linked, field)) != str(expected):
+                    raise RuntimeError(f"Memory MCP returned incompatible relation {field}")
+            for field, expected in (
+                ("confidence", relation.get("confidence")),
+                ("evidence_strength", relation.get("evidence_strength")),
+                ("direct", relation.get("direct")),
+                ("source", "supervisor"),
+            ):
+                if expected is not None and _field(linked, field) is not None and _field(linked, field) != expected:
+                    raise RuntimeError(f"Memory MCP returned incompatible relation {field}")
+            created_relations.append(linked)
             existing_relations.add(identity)
         return {
             "memory_update_result": {

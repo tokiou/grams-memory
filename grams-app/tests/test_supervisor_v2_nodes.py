@@ -179,6 +179,10 @@ def test_memory_candidates_require_claimed_event_provenance_and_materializations
         validate_materializations({"memories": [{
             "candidate_ref": "new_1", "title": "title", "content": "content", "status": "ACTIVE",
         }]}, {"new_1"})
+    assert validate_memory_proposal({
+        "memories": [{"category": "EVIDENCE", "title": "kept", "content": "kept", "candidate_ref": "new_2"}],
+        "relations": [],
+    })["memories"][0]["candidate_ref"] == "new_2"
 
 
 def test_extract_curate_and_materialize_memory_pipeline_keeps_jev_metadata_authoritative():
@@ -217,7 +221,8 @@ def test_extract_curate_and_materialize_memory_pipeline_keeps_jev_metadata_autho
                     "new_1_status": choice("FAILED"),
                     "new_1_progress": choice("NEGATIVE"),
                     "new_1_importance": choice("HIGH"),
-                    "new_1_relation": choice("NONE"),
+                    "new_1_relation_target": choice("NONE"),
+                    "new_1_relation_type": choice("NONE"),
                 }}
 
         state = {
@@ -551,9 +556,7 @@ def test_apply_memory_update_persists_curated_metadata_in_mcp_compatible_payload
                 return {
                     "id": "m-curated",
                     "category_id": value["category_id"],
-                    "type": value["type"],
-                    "status": value["status"],
-                    "confidence": value["confidence"],
+                    **value,
                 }
 
         memory = Memory()
@@ -699,6 +702,9 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
         class Generator:
             async def generate_text(self, **kwargs):
                 assert "guidance" not in kwargs["payload"]
+                assert kwargs["payload"]["evidence_memory_ids"] == ["m-evidence"]
+                assert kwargs["payload"]["reason_codes"] == ["POSSIBLE_PROGRESS_STALL"]
+                assert [item["id"] for item in kwargs["payload"]["selected_memories"]] == ["m-evidence"]
                 return "Run the focused validation."
 
         class OpenCode:
@@ -716,6 +722,7 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
 
             async def create(self, value):
                 assert value["category_id"] == "evidence-category"
+                assert value["description"].startswith("GRAMS_INTERVENTION_V1:")
                 return {"ID": "audit-1", "CategoryID": "evidence-category", **value}
 
             async def update(self, memory_id, value):
@@ -725,11 +732,22 @@ def test_intervention_generation_delivery_and_evidence_audit_are_separate():
         state = {
             "root_session_id": "session-1",
             "claimed_events": [{"id": "event-1", "lease_id": "lease-1"}],
-            "supervision_decision": {"action": "INTERVENE"},
+            "supervision_decision": {
+                "action": "INTERVENE",
+                "evidence_memory_ids": ["m-evidence"],
+                "reason_codes": ["POSSIBLE_PROGRESS_STALL"],
+            },
             "supervision_diagnostics": diagnostics(),
             "process_context": {
                 "process": {"id": "p1"},
-                "categories": {},
+                "categories": {
+                    "EVIDENCE": [{
+                        "id": "m-evidence",
+                        "category_id": "evidence-category",
+                        "title": "Progress blocker",
+                        "content": "No artifact exists yet.",
+                    }],
+                },
                 "key": {"evidence_category_id": "evidence-category"},
             },
         }

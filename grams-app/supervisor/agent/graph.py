@@ -86,7 +86,7 @@ def build_graph(
     graph.add_conditional_edges(
         "ASSESS_AGENT_HEALTH",
         lambda state: state.get("health_route", "normal"),
-        {"heartbeat": "FINALIZE", "recover": "SEND_INTERVENTION", "normal": "ENSURE_ACTIVE_PROCESS"},
+        {"heartbeat": "FINALIZE", "recover": "ENSURE_ACTIVE_PROCESS", "normal": "ENSURE_ACTIVE_PROCESS"},
     )
     graph.add_conditional_edges(
         "ENSURE_ACTIVE_PROCESS",
@@ -100,6 +100,7 @@ def build_graph(
             "assess": "ASSESS_PROCESS_CONTINUITY",
             "extract": "EXTRACT_MEMORY_CANDIDATES",
             "supervise": "SUPERVISION_DECISION",
+            "recover": "SEND_INTERVENTION",
         },
     )
     graph.add_conditional_edges(

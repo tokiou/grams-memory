@@ -141,6 +141,16 @@ SUPERVISION_ACTION_CRITERIA = {
     ),
 }
 
+INTERVENTION_REASON_CRITERIA = {
+    "POSSIBLE_PROGRESS_STALL": "Recent work shows activity without enough decision-relevant advancement.",
+    "POSSIBLE_RESEARCH_LOOP": "The Action Agent keeps investigating or gathering information without executing the bounded next step.",
+    "POSSIBLE_HYPOTHESIS_OSCILLATION": "Important hypotheses are being repeated, reversed, or contradicted without resolution.",
+    "DELIVERABLE_MISSING": "The requested artifact or implementation has not been produced despite substantial analysis.",
+    "VALIDATION_MISSING": "A significant implementation or assumption remains unvalidated before further work.",
+    "REPEATED_FAILURE": "The same failure or ineffective action has recurred without a material correction.",
+    "OBJECTIVE_DRIFT": "Recent work is focused on secondary details instead of the original objective.",
+}
+
 PROCESS_OUTCOME_INSTRUCTIONS = """
 Classify the terminal outcome only if the current process is closed.
 
@@ -355,6 +365,10 @@ An intervention may be needed when the Action Agent:
 
 Rules:
 - Preserve valid work already completed.
+- Treat `selected_memories` as the only evidence for the diagnosis. Do not cite
+  memories that were not selected or invent evidence from the broader state.
+- Use the supplied `reason_codes` to make the diagnosis specific, but do not
+  mention those internal codes or Supervisor implementation details.
 - Identify what behavior must stop, change, or be prioritized.
 - Give exactly one concrete immediate action.
 - Do not recommend repeating an action that already failed unchanged.

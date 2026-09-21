@@ -66,6 +66,7 @@ class SupervisorState(TypedDict, total=False):
     closed_process: dict[str, Any]
 
     # Intervention delivery.
+    selected_intervention_memories: list[dict[str, Any]]
     intervention_result: dict[str, Any]
     intervention_message: str
     acknowledged_event_ids: list[str]

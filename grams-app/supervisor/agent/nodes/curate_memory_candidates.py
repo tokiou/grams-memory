@@ -34,14 +34,8 @@ def _existing_targets(state: dict[str, Any]) -> list[str]:
     return targets[:4]
 
 
-def _relation_options(candidate_refs: list[str], existing_targets: list[str], current_ref: str) -> dict[str, tuple[str, str] | None]:
-    options: dict[str, tuple[str, str] | None] = {"NONE": None}
-    targets = [ref for ref in candidate_refs if ref != current_ref] + existing_targets
-    for target in targets:
-        for relation_type in sorted(RELATION_TYPES):
-            option = f"{relation_type}::{target}"
-            options[option] = (relation_type, target)
-    return options
+def _relation_targets(candidate_refs: list[str], existing_targets: list[str], current_ref: str) -> list[str]:
+    return [ref for ref in candidate_refs if ref != current_ref] + existing_targets
 
 
 def make_curate_memory_candidates(jev):
@@ -97,11 +91,39 @@ def make_curate_memory_candidates(jev):
                 },
                 "instructions": MEMORY_CURATION_INSTRUCTIONS,
             }
-            questions[f"{ref}_relation"] = {
+            relation_targets = _relation_targets(candidate_refs, existing_targets, ref)
+            questions[f"{ref}_relation_target"] = {
                 "type": "choice",
                 "criteria": {
-                    option: "Do not create a relation." if option == "NONE" else f"Create this relation from {ref}."
-                    for option in _relation_options(candidate_refs, existing_targets, ref)
+                    "NONE": "Do not create a relation.",
+                    **{target: f"Create a relation from {ref} to {target}." for target in relation_targets},
+                },
+                "instructions": MEMORY_CURATION_INSTRUCTIONS,
+            }
+            questions[f"{ref}_relation_type"] = {
+                "type": "choice",
+                "criteria": {
+                    "NONE": "Do not create a relation.",
+                    **{relation_type: f"Use the MCP relation {relation_type}." for relation_type in sorted(RELATION_TYPES)},
+                },
+                "instructions": MEMORY_CURATION_INSTRUCTIONS,
+            }
+            questions[f"{ref}_relation_strength"] = {
+                "type": "choice",
+                "criteria": {
+                    "STRONG": "The relation is directly supported by the candidate evidence.",
+                    "MEDIUM": "The relation is supported but not conclusive.",
+                    "WEAK": "The relation is plausible but only weakly supported.",
+                    "NONE": "Do not create a relation.",
+                },
+                "instructions": MEMORY_CURATION_INSTRUCTIONS,
+            }
+            questions[f"{ref}_relation_direct"] = {
+                "type": "choice",
+                "criteria": {
+                    "DIRECT": "The candidate directly establishes the relation.",
+                    "INFERRED": "The relation is inferred from the supplied context.",
+                    "NONE": "Do not create a relation.",
                 },
                 "instructions": MEMORY_CURATION_INSTRUCTIONS,
             }
@@ -126,15 +148,20 @@ def make_curate_memory_candidates(jev):
                 "progress_effect": _choice(raw_answers.get(f"{ref}_progress"), expected=PROGRESS_EFFECTS),
                 "importance": importance,
             })
-            relation_choice = _choice(raw_answers.get(f"{ref}_relation"))
-            relation_options = _relation_options(candidate_refs, existing_targets, ref)
-            selected_relation = relation_options.get(relation_choice)
-            if selected_relation is not None:
-                relation_type, target_ref = selected_relation
+            target_ref = _choice(raw_answers.get(f"{ref}_relation_target"))
+            relation_type = _choice(raw_answers.get(f"{ref}_relation_type"))
+            if target_ref != "NONE" and relation_type != "NONE":
+                strength = _choice(raw_answers.get(f"{ref}_relation_strength"), expected={"STRONG", "MEDIUM", "WEAK", "NONE"})
+                direct = _choice(raw_answers.get(f"{ref}_relation_direct"), expected={"DIRECT", "INFERRED", "NONE"})
+                if strength == "NONE" or direct == "NONE":
+                    raise ValueError("selected relation requires strength and directness")
                 relations.append({
                     "source_ref": ref,
                     "relation_type": relation_type,
                     "target_ref": target_ref,
+                    "confidence": {"STRONG": 0.9, "MEDIUM": 0.6, "WEAK": 0.3}[strength],
+                    "evidence_strength": strength,
+                    "direct": direct == "DIRECT",
                 })
         scoped_ids = {
             str(_field(memory, "id"))

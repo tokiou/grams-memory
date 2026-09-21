@@ -11,14 +11,13 @@ from supervisor.agent.state_builder import build_jev_process_state
 
 def _candidate_payload(state):
     payload = build_jev_process_state(state)
-    claimed_events = [event for event in state.get("claimed_events") or [] if isinstance(event, dict)]
-    payload["claimed_event_ids"] = [str(event["id"]) for event in claimed_events if event.get("id")]
+    visible_events = [event for event in payload.get("recent_execution") or [] if event.get("id")]
+    payload["claimed_event_ids"] = [str(event["id"]) for event in visible_events]
     payload["claimed_event_types"] = {
         str(event["id"]): str(event.get("type") or "")
-        for event in claimed_events
-        if event.get("id")
+        for event in visible_events
     }
-    payload["cycle_id"] = cycle_key(state) if claimed_events else None
+    payload["cycle_id"] = cycle_key(state) if state.get("claimed_events") else None
     return payload
 
 
@@ -30,10 +29,17 @@ def make_extract_memory_candidates(openrouter):
             system_prompt=MEMORY_CANDIDATE_SYSTEM_PROMPT,
             schema=MEMORY_CANDIDATES_JSON_SCHEMA,
         )
+        visible_events = [
+            event
+            for event in build_jev_process_state(state).get("recent_execution") or []
+            if event.get("id")
+        ]
+        expected_cycle_id = cycle_key(state) if state.get("claimed_events") else None
         return {
             "memory_candidates": validate_memory_candidates(
                 value,
-                [event for event in state.get("claimed_events") or [] if isinstance(event, dict)],
+                visible_events,
+                expected_cycle_id=expected_cycle_id,
             ),
         }
 

@@ -147,7 +147,12 @@ def make_load_process_context(memory):
         if not project_id or not process_id:
             raise ValueError("project_id and active_process_id are required to load process context")
         reload_reason = state.get("context_reload_reason")
-        route = "supervise" if reload_reason == "memory_update" else "extract" if reload_reason == "new_process" else "assess"
+        route = (
+            "recover" if state.get("health_route") == "recover"
+            else "supervise" if reload_reason == "memory_update"
+            else "extract" if reload_reason == "new_process"
+            else "assess"
+        )
         context = await load_process_context(memory, project_id, process_id)
         return {
             "process_context": context,

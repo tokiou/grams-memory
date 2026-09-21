@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, TypedDict
 
 
@@ -168,6 +169,7 @@ MAX_SUMMARY_LENGTH = 4000
 MAX_CANDIDATE_FACT_LENGTH = 1200
 MAX_CANDIDATE_EVIDENCE_LENGTH = 1000
 MAX_CANDIDATE_EVIDENCE_PER_MEMORY = 4
+MAX_CANDIDATE_PROVENANCE_EVENTS = 4
 CURATION_CONTRACT_VERSION = 1
 
 
@@ -190,8 +192,8 @@ def validate_memory_proposal(value: Any) -> MemoryUpdateProposal:
         if len(item["content"].strip()) > MAX_MEMORY_CONTENT_LENGTH:
             raise ValueError(f"memory candidate content cannot exceed {MAX_MEMORY_CONTENT_LENGTH} characters")
         ref = item.get("candidate_ref")
-        if ref != f"new_{index}" or ref in refs:
-            raise ValueError("candidate_ref values must be unique sequential new_N references")
+        if not isinstance(ref, str) or re.fullmatch(r"new_[1-9][0-9]*", ref) is None or ref in refs:
+            raise ValueError("candidate_ref values must be unique new_N references")
         refs.add(ref)
         normalized = {
             "category": item["category"],
@@ -242,7 +244,12 @@ def validate_memory_proposal(value: Any) -> MemoryUpdateProposal:
     return {"memories": memories, "relations": relations}
 
 
-def validate_memory_candidates(value: Any, claimed_events: list[dict[str, Any]]) -> list[FactualMemoryCandidate]:
+def validate_memory_candidates(
+    value: Any,
+    claimed_events: list[dict[str, Any]],
+    *,
+    expected_cycle_id: str | None = None,
+) -> list[FactualMemoryCandidate]:
     """Validate factual candidates before they enter the curation stage."""
     if not isinstance(value, dict) or not isinstance(value.get("candidates"), list):
         raise ValueError("memory candidates must contain a candidates list")
@@ -282,6 +289,8 @@ def validate_memory_candidates(value: Any, claimed_events: list[dict[str, Any]])
         if (
             not isinstance(source_event_ids, list)
             or not source_event_ids
+            or len(source_event_ids) > MAX_CANDIDATE_PROVENANCE_EVENTS
+            or len(set(source_event_ids)) != len(source_event_ids)
             or any(event_id not in event_ids for event_id in source_event_ids)
         ):
             raise ValueError("candidate provenance must reference claimed events")
@@ -289,11 +298,19 @@ def validate_memory_candidates(value: Any, claimed_events: list[dict[str, Any]])
         if (
             not isinstance(source_event_types, list)
             or not source_event_types
+            or len(source_event_types) > MAX_CANDIDATE_PROVENANCE_EVENTS
+            or len(source_event_types) != len(source_event_ids)
             or any(not isinstance(event_type, str) or not event_type.strip() for event_type in source_event_types)
         ):
             raise ValueError("candidate provenance requires source event types")
-        if set(source_event_types) - set(event_types[event_id] for event_id in source_event_ids):
-            raise ValueError("candidate provenance contains an unrelated event type")
+        if sorted(source_event_types) != sorted(event_types[event_id] for event_id in source_event_ids):
+            raise ValueError("candidate provenance event types do not match event ids")
+        cycle_id = provenance.get("cycle_id")
+        if expected_cycle_id is not None and cycle_id != expected_cycle_id:
+            raise ValueError("candidate provenance cycle_id does not match the claimed cycle")
+        evidence_event_ids = [proof["event_id"] for proof in normalized_evidence]
+        if len(set(evidence_event_ids)) != len(evidence_event_ids):
+            raise ValueError("candidate evidence cannot repeat an event")
         refs.add(item["candidate_ref"])
         candidates.append({
             "candidate_ref": item["candidate_ref"],
@@ -302,7 +319,7 @@ def validate_memory_candidates(value: Any, claimed_events: list[dict[str, Any]])
             "provenance": {
                 "source_event_ids": list(dict.fromkeys(source_event_ids)),
                 "source_event_types": list(dict.fromkeys(source_event_types)),
-                "cycle_id": provenance.get("cycle_id"),
+                "cycle_id": cycle_id,
             },
         })
     return candidates
@@ -423,6 +440,23 @@ def validate_supervision_decision(value: Any) -> SupervisionDecision:
         or value.get("summaries") is True
     ):
         raise ValueError("NEED_MORE_MEMORY requires a memory request")
+    if "evidence_memory_ids" in value and (
+        not isinstance(value["evidence_memory_ids"], list)
+        or any(not isinstance(item, str) or not item.strip() for item in value["evidence_memory_ids"])
+        or len(set(value["evidence_memory_ids"])) != len(value["evidence_memory_ids"])
+    ):
+        raise ValueError("supervision evidence_memory_ids is invalid")
+    if "reason_codes" in value and (
+        not isinstance(value["reason_codes"], list)
+        or any(item not in REASON_CODES for item in value["reason_codes"])
+        or len(set(value["reason_codes"])) != len(value["reason_codes"])
+    ):
+        raise ValueError("supervision reason_codes is invalid")
+    if action == "INTERVENE":
+        if not value.get("evidence_memory_ids"):
+            raise ValueError("INTERVENE requires evidence_memory_ids")
+        if not value.get("reason_codes"):
+            raise ValueError("INTERVENE requires reason_codes")
     if action == "CLOSE_PROCESS" and value.get("process_outcome") not in TERMINAL_OUTCOMES:
         raise ValueError("CLOSE_PROCESS requires a terminal outcome")
     if action == "CLOSE_PROCESS":

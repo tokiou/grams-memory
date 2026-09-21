@@ -133,9 +133,25 @@ def test_exhausted_memory_expansion_falls_back_to_high_probability_intervention(
             },
             "confidence": 0.8,
         }
-        jev = FakeJev([diagnostics, {"action": action}])
+        def choice(value):
+            return {"type": "choice", "choice": value, "probabilities": {value: 1.0}, "confidence": 0.9}
+
+        jev = FakeJev([
+            diagnostics,
+            {"action": action},
+            {
+                "evidence_memory_1": choice("m1"),
+                "evidence_memory_2": choice("NONE"),
+                "evidence_memory_3": choice("NONE"),
+                "intervention_reason_1": choice("POSSIBLE_PROGRESS_STALL"),
+                "intervention_reason_2": choice("NONE"),
+            },
+        ])
         result = await make_supervision_decision(jev)({
-            "process_context": {},
+            "process_context": {
+                "category_ids": {"EVIDENCE": "evidence-category"},
+                "categories": {"EVIDENCE": [{"id": "m1", "category_id": "evidence-category", "title": "Blocker", "content": "No progress"}]},
+            },
             "claimed_events": [],
             "memory_expansion_depth": 3,
         })

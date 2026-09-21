@@ -19,7 +19,8 @@ def make_assess_agent_health():
             payload = active_error.get("payload") or {}
             return {
                 "health_route": "recover",
-                "supervision_decision": {"action": "INTERVENE"},
+                # This is a transport/session recovery, not a JEV intervention.
+                # It therefore does not claim memory-grounded evidence.
                 "intervention_message": (
                     "OpenCode encountered an internal session error. Restart the task from the beginning, "
                     "verify the current environment, and do not assume the previous execution completed. "

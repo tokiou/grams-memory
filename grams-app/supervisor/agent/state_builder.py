@@ -287,6 +287,7 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
     """Keep the highest-value portions of a Jev state within a token budget."""
     compacted = copy.deepcopy(state)
     omitted: dict[str, int] = {}
+    omitted_ids: dict[str, list[str]] = {}
 
     def size() -> int:
         candidate = compacted
@@ -296,6 +297,7 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
                 "context_compaction": {
                     "truncated": True,
                     "omitted_items": omitted,
+                    "omitted_ids": omitted_ids,
                     "budget_tokens": max_tokens,
                 },
             }
@@ -310,7 +312,9 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
         if isinstance(target, dict) and target:
             target.pop(sorted(target)[0])
         elif isinstance(target, list) and target:
-            target.pop(-1 if from_end else 0)
+            removed = target.pop(-1 if from_end else 0)
+            if isinstance(removed, dict) and removed.get("id"):
+                omitted_ids.setdefault(key, []).append(str(removed["id"]))
         else:
             return False
         omitted[key] = omitted.get(key, 0) + 1
@@ -342,6 +346,7 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
         compacted["context_compaction"] = {
             "truncated": True,
             "omitted_items": omitted,
+            "omitted_ids": omitted_ids,
             "budget_tokens": max_tokens,
         }
     return compacted
