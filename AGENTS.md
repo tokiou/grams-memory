@@ -15,10 +15,10 @@ for working with OpenCode, Harbor, and GRAMS.
 
 ## Architecture
 
-GRAMS has two layers:
+GRAMS has two implemented layers:
 
-1. Durable event transport, implemented now.
-2. Supervisor-managed relational execution memory, described by the v1 design.
+1. Durable event transport through the SQLite Inbox.
+2. Supervisor-managed relational execution memory and LangGraph orchestration.
 
 The current transport is:
 
@@ -30,7 +30,7 @@ OpenCode
   -> SQLite Inbox
 ```
 
-The intended v1 Supervisor is:
+The Supervisor runtime currently processes Inbox events through:
 
 ```text
 SQLite Inbox
@@ -46,42 +46,40 @@ memory, typed relations, graph retrieval, and memory-conditioned decisions.
 
 ## Current Implementation
 
-Implemented transport components:
+Implemented components:
 
 - `grams-opencode/opencode_plugin/`: normalizes and sends OpenCode events.
 - `grams-app/supervisor/api/`: validates and receives `POST /events`.
 - `grams-app/supervisor/inbox/`: durable event journal, leases,
   retries, claims, and acknowledgements.
+- `grams-app/supervisor/agent/`: LangGraph state, graph, runtime, worker,
+  decision and memory-update nodes.
 - `grams-app/supervisor/platform/sqlite/`: SQLite setup.
 - `grams-app/supervisor/memory/`: retained Python MCP client.
 - `grams-app/supervisor/opencode/`: retained Python OpenCode client.
 - `grams-app/memory-mcp/`: retained standalone Go graph-memory MCP server.
 
-The following agentic components are intentionally not implemented in the
-current baseline and must be rebuilt for v1:
-
-- Supervisor worker/runtime.
-- LangGraph state and graph topology.
-- Review model and prompts.
-- Process lifecycle orchestration.
-- Memory update and graph-context nodes.
-- Intervention policy.
+The runtime, worker, LangGraph graph, process-memory operations, graph-context
+retrieval, review decisions, intervention delivery, and process lifecycle are
+implemented. The v1 and v2 documents describe their design contracts and
+intended behavior; consult the implementation and tests when checking the exact
+current behavior of an individual path.
 
 ## Event Inbox Contract
 
 `POST /events` persists an event before returning `202`. Events are stored in
 the `supervisor_events` SQLite table with status `PENDING`.
 
-The durable flow for a future consumer is:
+The durable flow consumed by the Supervisor worker is:
 
 ```text
 claim_pending -> PROCESSING -> ack -> PROCESSED
                               \-> fail -> PENDING or FAILED
 ```
 
-LangGraph nodes must consume events through `EventInbox`, not by maintaining a
-second in-memory event queue. Claimed events may be held in memory during one
-graph invocation, but SQLite remains the source of truth.
+The runtime and LangGraph nodes consume events through `EventInbox`, not by
+maintaining a second durable queue. Claimed events may be held in memory during
+one graph invocation, but SQLite remains the source of truth.
 
 The default database path is:
 

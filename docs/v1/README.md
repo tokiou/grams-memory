@@ -31,8 +31,10 @@ LangGraph
    +--> continue, expand, intervene, or close
 ```
 
-The receiver and Inbox are the durable transport layer. LangGraph is an
-orchestration layer over that transport; it is not the event store.
+The receiver and Inbox are the durable transport layer. The Supervisor worker
+claims Inbox events and runs LangGraph cycles over that transport. LangGraph is
+an orchestration layer, not the event store; SQLite remains the durable source
+of truth.
 
 ## Model Responsibilities
 
@@ -78,7 +80,7 @@ The Inbox owns:
 - acknowledgement;
 - recovery after process interruption.
 
-A future graph consumer must use this contract:
+The Supervisor worker and runtime consume events through this contract:
 
 ```text
 claim_pending -> PROCESSING -> ack -> PROCESSED
@@ -158,24 +160,23 @@ strategy. It closes only when accumulated evidence supports a terminal result.
 Closing a process writes or updates its Summary. Starting a new process keeps a
 relation to the previous process.
 
-## Component Boundary
+## Implemented Components
 
-Retained transport and integrations:
+The repository includes the durable transport, integrations, and Supervisor
+orchestration:
 
-- `grams-opencode/opencode_plugin/`;
-- `grams-app/supervisor/api/`;
-- `grams-app/supervisor/inbox/`;
-- `grams-app/supervisor/memory/`;
-- `grams-app/supervisor/opencode/`;
-- `grams-app/supervisor/platform/sqlite/`;
-- `grams-app/memory-mcp/`.
+- `grams-opencode/opencode_plugin/` — event normalization and delivery;
+- `grams-app/supervisor/api/` — event and intervention HTTP endpoints;
+- `grams-app/supervisor/inbox/` — durable event journal, claims, leases,
+  retries, and acknowledgements;
+- `grams-app/supervisor/agent/` — graph, state, runtime, background worker,
+  decision and memory-update nodes;
+- `grams-app/supervisor/memory/` — Python Memory MCP client;
+- `grams-app/supervisor/opencode/` — OpenCode control and context client;
+- `grams-app/supervisor/platform/sqlite/` — Supervisor database setup;
+- `grams-app/memory-mcp/` — standalone Go graph-memory MCP server.
 
-To be rebuilt as v1 orchestration:
-
-- Supervisor Runtime;
-- LangGraph graph and state;
-- process-memory update flow;
-- graph-context retrieval;
-- review policy;
-- intervention delivery policy;
-- process closing and next-process creation.
+The flow and process-memory principles in this document describe the intended
+behavioral contract. For implementation details and tested edge cases, use the
+runtime code, the focused tests under `grams-app/tests/`, and the v2 design in
+[`../v2/JEV_OPENROUTER.md`](../v2/JEV_OPENROUTER.md).

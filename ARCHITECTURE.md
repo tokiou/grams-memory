@@ -530,7 +530,8 @@ grams-app/supervisor/api/: HTTP event ingress.
 
 grams-app/supervisor/inbox/: durable event journal and lease operations.
 
-grams-app/supervisor/runtime/: Supervisor lifecycle.
+grams-app/supervisor/agent/runtime.py and worker.py: Supervisor lifecycle and
+Inbox event processing.
 
 grams-app/supervisor/agent/: LangGraph state, routing, prompts, and review nodes.
 
@@ -544,13 +545,16 @@ grams-app/memory-mcp/: standalone Go graph-memory MCP.
 
 Current Implementation Status
 
-The durable event transport and SQLite Inbox are already part of the system.
+The durable event transport, SQLite Inbox, Supervisor worker, LangGraph runtime,
+process-memory operations, context retrieval, Jev decisions, OpenRouter text
+generation, intervention delivery, and process lifecycle are implemented under
+`grams-app/supervisor/`. The standalone Go Memory MCP is a separate service used
+by the runtime.
 
-The standalone Go Memory MCP is available as a separate component.
-
-The architecture described above is the target Supervisor design: process-managed graph memory, mandatory current-process context, progressive graph expansion, and memory-conditioned intervention.
-
-Implementation details may evolve, but the functional invariants in this document should remain stable.
+This document captures the architecture and behavioral contracts. The exact
+coverage and edge-case behavior of each flow continue to evolve; consult the
+implementation and tests before treating a design invariant as a verified
+runtime guarantee.
 
 Local Setup
 
@@ -600,7 +604,15 @@ GRAMS_EVENT_ENDPOINT=http://127.0.0.1:8765/events
 
 Verification
 
-pytest -q grams-app/tests/test_event_server.py grams-app/tests/test_observability.py
+Run the Python test suite from the repository root:
+
+pytest -q grams-app/tests
+
+Run Go MCP tests from `grams-app/memory-mcp`:
+
+go test ./...
+
+Also run:
 
 git diff --check
 
