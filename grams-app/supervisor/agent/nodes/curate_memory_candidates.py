@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from supervisor.agent.nodes.common import answers, jev_call, typed_answer
+from supervisor.agent.services.jev_service import JevClient
 from supervisor.agent.prompts import MEMORY_CURATION_INSTRUCTIONS
 from supervisor.agent.schemas import (
     MEMORY_TYPES,
@@ -11,6 +12,7 @@ from supervisor.agent.schemas import (
     RELATION_TYPES,
     validate_memory_curation,
 )
+from supervisor.agent.state import SupervisorState
 from supervisor.agent.state_builder import build_jev_process_state
 from supervisor.memory.client import _field
 
@@ -23,7 +25,7 @@ def _choice(value: Any, *, expected: set[str] | None = None) -> str:
     return selected
 
 
-def _existing_targets(state: dict[str, Any]) -> list[str]:
+def _existing_targets(state: SupervisorState) -> list[str]:
     context = state.get("process_context") or {}
     targets: list[str] = []
     for category in ("EVIDENCE", "STRATEGY"):
@@ -38,8 +40,8 @@ def _relation_targets(candidate_refs: list[str], existing_targets: list[str], cu
     return [ref for ref in candidate_refs if ref != current_ref] + existing_targets
 
 
-def make_curate_memory_candidates(jev):
-    async def node(state):
+def make_curate_memory_candidates(jev: JevClient):
+    async def node(state: SupervisorState):
         candidates = list(state.get("memory_candidates") or [])
         if not candidates:
             return {"memory_curation": {"decisions": [], "relations": []}}

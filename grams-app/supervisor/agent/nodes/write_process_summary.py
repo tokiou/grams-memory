@@ -1,11 +1,15 @@
 from __future__ import annotations
+
+from supervisor.agent.services.openrouter_service import OpenRouterClient
+from supervisor.agent.state import SupervisorState
+
 from supervisor.agent.prompts import PROCESS_SUMMARY_SYSTEM_PROMPT
 from supervisor.agent.schemas import PROCESS_SUMMARY_JSON_SCHEMA
 from supervisor.agent.schemas import validate_summary
 from supervisor.agent.state_builder import build_jev_process_state
 
-def make_write_process_summary(openrouter):
-    async def node(state):
+def make_write_process_summary(openrouter: OpenRouterClient):
+    async def node(state: SupervisorState):
         pivot = state.get("process_continuity", {}).get("decision") == "NEW_PROCESS"
         outcome = "SUPERSEDED" if pivot else state.get("supervision_decision", {}).get("process_outcome")
         if outcome not in {"SUCCEEDED", "FAILED", "SUPERSEDED", "ABANDONED"}:

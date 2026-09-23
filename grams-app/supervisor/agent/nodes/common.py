@@ -3,8 +3,15 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from supervisor.agent.services.jev_service import JevClient
+from supervisor.agent.state import SupervisorState
 
-async def jev_call(client: Any, state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
+
+async def jev_call(
+    client: JevClient,
+    state: dict[str, Any],
+    questions: dict[str, Any],
+) -> dict[str, Any]:
     if not hasattr(client, "system_one"):
         raise TypeError("Jev client must provide system_one")
     result = await client.system_one(state=state, questions=questions)
@@ -13,7 +20,7 @@ async def jev_call(client: Any, state: dict[str, Any], questions: dict[str, Any]
     return result
 
 
-def cycle_key(state: dict[str, Any]) -> str:
+def cycle_key(state: SupervisorState) -> str:
     events = [event for event in state.get("claimed_events") or [] if isinstance(event, dict)]
     cycle_ids = {str(event["cycle_id"]) for event in events if event.get("cycle_id")}
     if cycle_ids:

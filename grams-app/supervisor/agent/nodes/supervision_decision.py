@@ -16,6 +16,8 @@ from supervisor.agent.prompts import (
     SUPERVISION_ACTION_INSTRUCTIONS,
 )
 from supervisor.agent.schemas import REASON_CODES, RELATION_TYPES, validate_supervision_decision
+from supervisor.agent.services.jev_service import JevClient
+from supervisor.agent.state import SupervisorState
 from supervisor.agent.state_builder import build_jev_process_state
 from supervisor.memory.client import _field
 from supervisor.observability import emit
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 ACTIONS = ["CONTINUE", "NEED_MORE_MEMORY", "INTERVENE", "CLOSE_PROCESS"]
 
 
-def _intervention_evidence(state: dict[str, Any], base: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _intervention_evidence(state: SupervisorState, base: dict[str, Any]) -> dict[str, dict[str, Any]]:
     context = state.get("process_context") or {}
     category_id = (context.get("category_ids") or {}).get("EVIDENCE")
     evidence: dict[str, dict[str, Any]] = {}
@@ -42,8 +44,8 @@ def _intervention_evidence(state: dict[str, Any], base: dict[str, Any]) -> dict[
 
 
 async def _select_intervention_evidence(
-    jev,
-    state: dict[str, Any],
+    jev: JevClient,
+    state: SupervisorState,
     base: dict[str, Any],
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     evidence = _intervention_evidence(state, base)
@@ -94,7 +96,7 @@ async def _select_intervention_evidence(
     return evidence_ids, reasons, [evidence[memory_id] for memory_id in evidence_ids]
 
 
-def _expansion_targets(state: dict[str, Any]) -> dict[str, Any]:
+def _expansion_targets(state: SupervisorState) -> dict[str, Any]:
     context = state.get("process_context") or {}
     categories = context.get("categories") or {}
     memory_ids = []
@@ -117,7 +119,7 @@ def _expansion_targets(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def make_supervision_decision(
-    jev,
+    jev: JevClient,
     action_threshold: float | None = None,
     context_sufficient_threshold: float | None = None,
     outcome_threshold: float | None = None,
@@ -144,7 +146,7 @@ def make_supervision_decision(
     )):
         raise ValueError("Jev thresholds must be between zero and one")
 
-    async def node(state):
+    async def node(state: SupervisorState):
         base = build_jev_process_state(state)
         diagnostic_questions = {
             "progress_stall_probability": {

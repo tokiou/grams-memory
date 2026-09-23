@@ -4,21 +4,23 @@ import logging
 import os
 
 from .common import answers, jev_call, typed_answer
+from supervisor.agent.services.jev_service import JevClient
 from supervisor.agent.prompts import PROCESS_CONTINUITY_CRITERIA, PROCESS_CONTINUITY_INSTRUCTIONS
 from supervisor.agent.schemas import validate_continuity
+from supervisor.agent.state import SupervisorState
 from supervisor.agent.state_builder import build_jev_process_state
 from supervisor.observability import emit
 
 logger = logging.getLogger(__name__)
 
-def make_assess_process_continuity(jev, new_process_threshold: float | None = None):
+def make_assess_process_continuity(jev: JevClient, new_process_threshold: float | None = None):
     threshold = new_process_threshold if new_process_threshold is not None else float(
         os.getenv("JEV_NEW_PROCESS_MIN_PROB", "0.7")
     )
     if not 0 <= threshold <= 1:
         raise ValueError("new process threshold must be between zero and one")
 
-    async def node(state):
+    async def node(state: SupervisorState):
         result = await jev_call(jev, build_jev_process_state(state), {
             "continuity": {
                 "type": "choice",

@@ -4,12 +4,27 @@ import asyncio
 from datetime import datetime, timezone
 import logging
 import sqlite3
+from typing import Protocol
 
 from supervisor.inbox.model import EventStatus, SupervisorEvent, SupervisorEventInput
 from supervisor.inbox.repository import InboxRepository
 from supervisor.observability import elapsed_ms, emit, event_correlation, monotonic_ns, source_lag_info
 
 logger = logging.getLogger(__name__)
+
+
+class Inbox(Protocol):
+    """Event Inbox contract consumed by the Supervisor graph."""
+
+    async def claim_pending(
+        self,
+        root_session_id: str,
+        limit: int | None = None,
+        *,
+        run_id: str | None = None,
+    ) -> list[SupervisorEvent]: ...
+
+    async def ack_batch(self, claims: list[tuple[str, str]]) -> bool: ...
 
 
 class EventInbox:

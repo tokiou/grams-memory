@@ -7,8 +7,11 @@ from typing import Any
 
 from supervisor.agent.nodes.common import cycle_key
 from supervisor.agent.prompts import format_intervention_for_agent
+from supervisor.agent.state import SupervisorState
 from supervisor.interventions import InterventionStatus
-from supervisor.memory.client import _field
+from supervisor.interventions.repository import PendingInterventionRepository
+from supervisor.memory.client import MemoryClient, _field
+from supervisor.opencode.client import OpenCodeClient
 from supervisor.observability import emit
 
 logger = logging.getLogger(__name__)
@@ -36,7 +39,7 @@ def _message_from_audit(value: Any) -> str | None:
     return message or None
 
 
-def _audit_description(state: dict[str, Any]) -> str:
+def _audit_description(state: SupervisorState) -> str:
     decision = state.get("supervision_decision") or {}
     value = {
         "version": 1,
@@ -49,13 +52,13 @@ def _audit_description(state: dict[str, Any]) -> str:
 
 
 def make_send_intervention(
-    opencode,
-    memory,
+    opencode: OpenCodeClient,
+    memory: MemoryClient,
     *,
-    pending_interventions=None,
+    pending_interventions: PendingInterventionRepository | None = None,
     fallback_mode: str | None = None,
 ):
-    async def node(state):
+    async def node(state: SupervisorState):
         session_id = state.get("root_session_id")
         message = state.get("intervention_message")
         category_id = state.get("process_context", {}).get("key", {}).get("evidence_category_id")

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from supervisor.agent.state import SupervisorState
 from supervisor.agent.nodes.load_process_context import load_process_context
 from supervisor.agent.schemas import RELATION_TYPES
-from supervisor.memory.client import _field
+from supervisor.memory.client import MemoryClient, _field
 
 
-def _scoped_memory_ids(state: dict[str, Any]) -> set[str]:
+def _scoped_memory_ids(state: SupervisorState) -> set[str]:
     categories = (state.get("process_context") or {}).get("categories") or {}
     return {
         str(memory_id)
@@ -17,13 +18,13 @@ def _scoped_memory_ids(state: dict[str, Any]) -> set[str]:
     }
 
 
-def make_expand_graph(memory, *, max_depth=3):
+def make_expand_graph(memory: MemoryClient, *, max_depth: int = 3):
     if max_depth < 1:
         raise ValueError("max_depth must be positive")
     if max_depth > 3:
         raise ValueError("max_depth cannot exceed 3")
 
-    async def node(state):
+    async def node(state: SupervisorState):
         raw_depth = state.get("memory_expansion_depth", 0)
         if not isinstance(raw_depth, int) or isinstance(raw_depth, bool) or raw_depth < 0:
             raise ValueError("memory_expansion_depth must be an integer from zero to three")

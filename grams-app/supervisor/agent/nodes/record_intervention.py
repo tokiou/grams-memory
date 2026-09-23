@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 
-from supervisor.memory.client import _field
+from supervisor.agent.state import SupervisorState
+from supervisor.memory.client import MemoryClient, _field
 
 
-def _audit_description(state):
+def _audit_description(state: SupervisorState) -> str:
     decision = state.get("supervision_decision") or {}
     value = {
         "version": 1,
@@ -16,8 +17,8 @@ def _audit_description(state):
     }
     return "GRAMS_INTERVENTION_V1:" + json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
 
-def make_record_intervention(memory):
-    async def node(state):
+def make_record_intervention(memory: MemoryClient):
+    async def node(state: SupervisorState):
         category_id = state.get("process_context", {}).get("key", {}).get("evidence_category_id")
         message = state.get("intervention_result", {}).get("message")
         if not category_id:

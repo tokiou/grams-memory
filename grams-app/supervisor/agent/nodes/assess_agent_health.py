@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from supervisor.agent.state import SupervisorState
+
 
 def make_assess_agent_health():
-    async def node(state: dict[str, Any]) -> dict[str, Any]:
+    async def node(state: SupervisorState) -> dict[str, Any]:
         events = state.get("claimed_events") or []
         errors = [event for event in events if event.get("type") == "SESSION_INTERNAL_ERROR"]
         active_error = next(

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from supervisor.agent.nodes.common import cycle_key
+from supervisor.agent.services.process_service import ProcessLifecycle
+from supervisor.agent.state import SupervisorState
 
-def make_ensure_active_process(process_service):
-    async def node(state):
+
+def make_ensure_active_process(process_service: ProcessLifecycle):
+    async def node(state: SupervisorState):
         if not state.get("root_session_id"):
             raise ValueError("root_session_id is required to ensure an active process")
         project_id = state.get("project_id") or await process_service.memory.ensure_session_project(state["root_session_id"])

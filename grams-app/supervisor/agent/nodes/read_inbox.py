@@ -1,7 +1,16 @@
 from __future__ import annotations
 
-def make_read_inbox(inbox, *, batch_size=20, run_id=None):
-    async def node(state):
+from supervisor.agent.state import SupervisorState
+from supervisor.inbox.inbox import Inbox
+
+
+def make_read_inbox(
+    inbox: Inbox,
+    *,
+    batch_size: int = 20,
+    run_id: str | None = None,
+):
+    async def node(state: SupervisorState):
         if "claimed_events" in state:
             return {"claimed_events": state["claimed_events"]}
         events = await inbox.claim_pending(state["root_session_id"], batch_size, run_id=run_id)

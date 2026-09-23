@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from supervisor.agent.services.process_service import ProcessLifecycle
+from supervisor.agent.state import SupervisorState
 
-def make_start_new_process(process_service):
-    async def node(state):
+
+def make_start_new_process(process_service: ProcessLifecycle):
+    async def node(state: SupervisorState):
         project_id = state.get("project_id")
         predecessor_id = state.get("pending_process_transition", {}).get("predecessor_id")
         if not project_id or predecessor_id != state.get("active_process_id"):

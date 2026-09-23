@@ -5,7 +5,8 @@ from typing import Any
 from supervisor.agent.nodes.common import cycle_key
 
 from supervisor.agent.schemas import validate_memory_proposal
-from supervisor.memory.client import _field
+from supervisor.agent.state import SupervisorState
+from supervisor.memory.client import MemoryClient, _field
 
 
 def _identity(category: str, title: str, content: str) -> tuple[str, str, str]:
@@ -69,8 +70,8 @@ def _curation_envelope(description: str) -> dict[str, Any] | None:
     return value
 
 
-def make_apply_memory_update(memory):
-    async def node(state):
+def make_apply_memory_update(memory: MemoryClient):
+    async def node(state: SupervisorState):
         proposal = validate_memory_proposal(
             state.get("proposed_memory_update", {"memories": [], "relations": []})
         )

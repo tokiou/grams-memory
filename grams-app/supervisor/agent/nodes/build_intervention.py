@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from supervisor.agent.prompts import INTERVENTION_SYSTEM_PROMPT
 from supervisor.agent.schemas import REASON_CODES
+from supervisor.agent.services.openrouter_service import OpenRouterClient
+from supervisor.agent.state import SupervisorState
 from supervisor.agent.state_builder import build_jev_process_state
 
 
-def make_build_intervention(openrouter):
-    async def node(state):
+def make_build_intervention(openrouter: OpenRouterClient):
+    async def node(state: SupervisorState):
         decision = state.get("supervision_decision") or {}
         if decision.get("action") != "INTERVENE":
             raise ValueError("BUILD_INTERVENTION requires an INTERVENE decision")

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from supervisor.memory.client import _field
 from supervisor.agent.nodes.common import cycle_key
+from supervisor.agent.services.process_service import ProcessLifecycle
+from supervisor.agent.state import SupervisorState
+from supervisor.memory.client import MemoryClient, _field
 
 
-def make_close_current_process(process_service, memory):
-    async def node(state):
+def make_close_current_process(process_service: ProcessLifecycle, memory: MemoryClient):
+    async def node(state: SupervisorState):
         summary = state.get("pending_process_summary") or {}
         pivot = state.get("process_continuity", {}).get("decision") == "NEW_PROCESS"
         outcome = "SUPERSEDED" if pivot else summary.get("outcome")

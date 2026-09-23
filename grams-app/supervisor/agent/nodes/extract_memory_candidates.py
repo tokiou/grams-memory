@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+
 from supervisor.agent.nodes.common import cycle_key
 from supervisor.agent.prompts import MEMORY_CANDIDATE_SYSTEM_PROMPT
 from supervisor.agent.schemas import (
     MEMORY_CANDIDATES_JSON_SCHEMA,
     validate_memory_candidates,
 )
+from supervisor.agent.services.openrouter_service import OpenRouterClient
+from supervisor.agent.state import SupervisorState
 from supervisor.agent.state_builder import build_jev_process_state
 
 
-def _candidate_payload(state):
+def _candidate_payload(state: SupervisorState) -> dict[str, Any]:
     payload = build_jev_process_state(state)
     visible_events = [event for event in payload.get("recent_execution") or [] if event.get("id")]
     payload["claimed_event_ids"] = [str(event["id"]) for event in visible_events]
@@ -21,8 +25,8 @@ def _candidate_payload(state):
     return payload
 
 
-def make_extract_memory_candidates(openrouter):
-    async def node(state):
+def make_extract_memory_candidates(openrouter: OpenRouterClient):
+    async def node(state: SupervisorState):
         value = await openrouter.generate_json(
             operation="EXTRACT_MEMORY_CANDIDATES",
             payload=_candidate_payload(state),

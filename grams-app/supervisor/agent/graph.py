@@ -1,5 +1,8 @@
 """LangGraph wiring for the v2 Supervisor."""
 
+from typing import Any, Literal
+
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from supervisor.agent.nodes.apply_memory_update import make_apply_memory_update
@@ -20,24 +23,30 @@ from supervisor.agent.nodes.send_intervention import make_send_intervention
 from supervisor.agent.nodes.start_new_process import make_start_new_process
 from supervisor.agent.nodes.supervision_decision import make_supervision_decision
 from supervisor.agent.nodes.write_process_summary import make_write_process_summary
-from supervisor.agent.services.process_service import ProcessService
+from supervisor.agent.services.jev_service import JevClient
+from supervisor.agent.services.openrouter_service import OpenRouterClient
+from supervisor.agent.services.process_service import ProcessLifecycle, ProcessService
 from supervisor.agent.state import SupervisorState
+from supervisor.inbox.inbox import Inbox
+from supervisor.interventions.repository import PendingInterventionRepository
+from supervisor.memory.client import MemoryClient
+from supervisor.opencode.client import OpenCodeClient
 
 
 def build_graph(
     *,
-    inbox,
-    memory,
-    jev,
-    openrouter,
-    opencode,
-    interventions=None,
-    intervention_fallback="system_transform",
-    process_service=None,
-    batch_size=20,
-    run_id=None,
-    max_expansion_depth=3,
-    checkpointer=None,
+    inbox: Inbox,
+    memory: MemoryClient,
+    jev: JevClient,
+    openrouter: OpenRouterClient,
+    opencode: OpenCodeClient,
+    interventions: PendingInterventionRepository | None = None,
+    intervention_fallback: Literal["system_transform", "prompt_async"] = "system_transform",
+    process_service: ProcessLifecycle | None = None,
+    batch_size: int = 20,
+    run_id: str | None = None,
+    max_expansion_depth: int = 3,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
 ):
     if max_expansion_depth > 3:
         raise ValueError("max_expansion_depth cannot exceed 3")

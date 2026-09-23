@@ -7,11 +7,13 @@ from supervisor.agent.schemas import (
     validate_materializations,
     validate_memory_proposal,
 )
+from supervisor.agent.services.openrouter_service import OpenRouterClient
+from supervisor.agent.state import SupervisorState
 from supervisor.agent.state_builder import build_jev_process_state
 
 
-def make_materialize_memories(openrouter):
-    async def node(state):
+def make_materialize_memories(openrouter: OpenRouterClient):
+    async def node(state: SupervisorState):
         candidates = list(state.get("memory_candidates") or [])
         curation = state.get("memory_curation") or {"decisions": [], "relations": []}
         decisions = {item["candidate_ref"]: item for item in curation["decisions"]}

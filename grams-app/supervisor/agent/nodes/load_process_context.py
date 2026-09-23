@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from supervisor.memory.client import _field
+from supervisor.agent.state import SupervisorState
+from supervisor.memory.client import MemoryClient, _field
 
 
 def _normalized(value: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
@@ -14,7 +15,11 @@ def _normalized(value: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any
     return result
 
 
-async def load_process_context(memory, project_id: str, process_id: str) -> dict[str, Any]:
+async def load_process_context(
+    memory: MemoryClient,
+    project_id: str,
+    process_id: str,
+) -> dict[str, Any]:
     process_value = await memory.get_process(process_id)
     if not isinstance(process_value, dict):
         raise RuntimeError(f"process {process_id} was not found")
@@ -140,8 +145,8 @@ async def load_process_context(memory, project_id: str, process_id: str) -> dict
     }
 
 
-def make_load_process_context(memory):
-    async def node(state):
+def make_load_process_context(memory: MemoryClient):
+    async def node(state: SupervisorState):
         project_id = state.get("project_id")
         process_id = state.get("active_process_id")
         if not project_id or not process_id:

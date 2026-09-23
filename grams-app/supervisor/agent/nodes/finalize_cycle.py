@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from supervisor.agent.state import SupervisorState
+from supervisor.inbox.inbox import Inbox
 
-def make_finalize_cycle(inbox):
-    async def node(state):
+
+def make_finalize_cycle(inbox: Inbox):
+    async def node(state: SupervisorState):
         claims = []
         for event in state.get("claimed_events") or []:
             event_id = event.get("id")

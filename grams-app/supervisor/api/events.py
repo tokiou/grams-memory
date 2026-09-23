@@ -6,7 +6,9 @@ import math
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic import ValidationError
 
+from supervisor.api.schema import EventRequest
 from supervisor.inbox import SupervisorEventInput
 from supervisor.observability import emit
 
@@ -29,7 +31,18 @@ def _validate_finite_json(value: object) -> None:
 
 
 def register_event_routes(app: FastAPI) -> None:
-    @app.post("/events", status_code=202)
+    @app.post(
+        "/events",
+        status_code=202,
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {"schema": EventRequest.model_json_schema()},
+                },
+            },
+        },
+    )
     async def receive_event(request: Request) -> Response:
         if not getattr(request.app.state, "accepting", True):
             return JSONResponse(status_code=503, content={"detail": "event inbox is shutting down"})
@@ -39,6 +52,22 @@ def register_event_routes(app: FastAPI) -> None:
             _validate_finite_json(payload)
         except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
             return JSONResponse(status_code=400, content={"detail": "request body must be JSON"})
+
+        try:
+            EventRequest.model_validate(payload)
+        except ValidationError as error:
+            errors = [
+                {
+                    "field": ".".join(str(part) for part in item["loc"]),
+                    "message": item["msg"],
+                    "type": item["type"],
+                }
+                for item in error.errors()
+            ]
+            return JSONResponse(
+                status_code=422,
+                content={"detail": "request body does not match the event schema", "errors": errors},
+            )
 
         event = None
         try:
