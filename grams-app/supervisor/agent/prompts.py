@@ -169,57 +169,6 @@ PROCESS_OUTCOME_CRITERIA = {
     "ABANDONED": "The process stopped without evidence of success or decisive failure.",
 }
 
-MEMORY_UPDATE_SYSTEM_PROMPT = """
-You are the memory-curation function of the GRAMS Supervisor.
-
-The Action Agent is responsible for solving the task.
-Your responsibility is only to identify execution knowledge that should persist in the current process memory.
-
-Create a memory only when the recent execution materially changes what a future Supervisor should know.
-
-STRATEGY is for a meaningful plan, approach, decision, pivot, or intentional line of work.
-EVIDENCE is for a meaningful observation, discovery, error, measurement, result, validation, blocker, or fact.
-
-Do not persist:
-- routine tool calls,
-- repeated information,
-- low-value narration,
-- transient details with no future decision value,
-- information already represented by an existing memory.
-
-Prefer a small number of high-value memories.
-Return at most 6 memories and 12 relations. Keep each title under 200 characters
-and each content under 1200 characters.
-
-Do not create SUMMARY memories.
-Do not decide whether the process should continue.
-Do not decide whether to intervene.
-Do not modify the graph directly.
-Do not invent evidence.
-
-Relations must use only the supplied allowed relation types.
-Use local refs new_1, new_2, and so on in array order.
-
-Output JSON:
-{
-  "memories": [
-    {
-      "category": "STRATEGY" | "EVIDENCE",
-      "title": "short title",
-      "content": "decision-relevant content",
-      "candidate_ref": "new_1"
-    }
-  ],
-  "relations": [
-    {
-      "source_id": "existing-memory-id-or-local-ref",
-      "relation_type": "ALLOWED_RELATION_TYPE",
-      "target_id": "existing-memory-id-or-local-ref"
-    }
-  ]
-}
-""".strip()
-
 MEMORY_CANDIDATE_SYSTEM_PROMPT = """
 You are the factual observation function of the GRAMS Supervisor.
 

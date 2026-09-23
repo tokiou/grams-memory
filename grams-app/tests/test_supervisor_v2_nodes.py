@@ -130,7 +130,7 @@ def test_openrouter_rejects_length_truncated_responses():
         client = OpenRouterClient(api_key="test-key", model="test-model", http=http)
         with pytest.raises(RuntimeError, match="truncated by max_tokens"):
             await client.generate_json(
-                operation="EXTRACT_MEMORY_UPDATE",
+                operation="EXTRACT_MEMORY_CANDIDATES",
                 payload={},
                 system_prompt="system",
                 schema={"type": "object"},

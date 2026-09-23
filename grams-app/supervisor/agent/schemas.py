@@ -500,41 +500,6 @@ def validate_continuity(value: Any) -> ProcessContinuityDecision:
     return dict(value)
 
 
-MEMORY_UPDATE_JSON_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["memories", "relations"],
-    "properties": {
-        "memories": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["category", "title", "content", "candidate_ref"],
-                "properties": {
-                    "category": {"type": "string", "enum": ["STRATEGY", "EVIDENCE"]},
-                    "title": {"type": "string", "minLength": 1},
-                    "content": {"type": "string", "minLength": 1},
-                    "candidate_ref": {"type": "string", "pattern": "^new_[1-9][0-9]*$"},
-                },
-            },
-        },
-        "relations": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["source_id", "relation_type", "target_id"],
-                "properties": {
-                    "source_id": {"type": "string", "minLength": 1},
-                    "relation_type": {"type": "string", "enum": sorted(RELATION_TYPES)},
-                    "target_id": {"type": "string", "minLength": 1},
-                },
-            },
-        },
-    },
-}
-
 MEMORY_CANDIDATES_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
