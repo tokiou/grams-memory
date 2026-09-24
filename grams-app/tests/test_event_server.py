@@ -62,6 +62,27 @@ def test_invalid_event_schema_returns_unprocessable_entity_without_inserting():
             assert database.execute("SELECT COUNT(*) FROM supervisor_events").fetchone() == (0,)
 
 
+def test_events_without_a_real_session_are_rejected_without_default_inbox_rows():
+    temporary_directory, client = make_client()
+    payloads = [
+        event_request({"properties": {"file": "/app/sol.sql"}}, session_id=None),
+        event_request({"properties": {"file": "/app/sol.sql"}}, session_id=""),
+        event_request({"properties": {"file": "/app/sol.sql"}}, session_id="default"),
+        event_request({"properties": {"file": "/app/sol.sql"}}, root_session_id="default"),
+    ]
+    missing_session = event_request({"properties": {"file": "/app/sol.sql"}})
+    missing_session.pop("session_id")
+    payloads.append(missing_session)
+
+    with temporary_directory, client:
+        for payload in payloads:
+            response = client.post("/events", json=payload)
+            assert response.status_code == 422
+
+        with sqlite3.connect(client.app.state.config.db_path) as database:
+            assert database.execute("SELECT COUNT(*) FROM supervisor_events").fetchone() == (0,)
+
+
 def test_unknown_event_fields_are_accepted_and_preserved():
     temporary_directory, client = make_client()
     payload = event_request({"text": "hello"}, plugin_extension={"version": 2})

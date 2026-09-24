@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from supervisor.session_identity import validate_session_id
+
 
 class EventRequest(BaseModel):
     """Version 1 event envelope emitted by the GRAMS OpenCode plugin."""
@@ -15,13 +17,25 @@ class EventRequest(BaseModel):
     type: str = Field(min_length=1)
     source_event: str = Field(min_length=1)
     timestamp: str = Field(min_length=1)
-    session_id: str | None
+    session_id: str = Field(min_length=1)
     payload: Any
     id: str | None = None
     root_session_id: str | None = None
     run_id: str | None = None
     instance_id: str | None = None
     sequence: int | None = None
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, value: str) -> str:
+        return validate_session_id(value)
+
+    @field_validator("root_session_id")
+    @classmethod
+    def validate_root_session(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_session_id(value, field_name="root_session_id")
 
     @field_validator("timestamp")
     @classmethod

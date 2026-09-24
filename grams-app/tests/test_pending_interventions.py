@@ -3,6 +3,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from supervisor.interventions import (
@@ -46,6 +48,102 @@ def test_pending_intervention_is_session_scoped_idempotent_and_one_shot(tmp_path
             str(claimed["id"]), "session-1", "wrong-token"
         )
         await connection.close()
+
+    asyncio.run(scenario())
+
+
+def test_synthetic_default_session_cannot_enqueue_or_claim_interventions(tmp_path):
+    async def scenario():
+        connection = await open_connection(tmp_path / "supervisor.db")
+        repository = PendingInterventionRepository(connection)
+        await repository.initialize()
+        try:
+            try:
+                await repository.enqueue("default", "Do not deliver.", "cycle-default")
+            except ValueError as error:
+                assert "session ID" in str(error)
+            else:
+                raise AssertionError("default must never receive a pending intervention")
+
+            try:
+                await repository.claim("default")
+            except ValueError as error:
+                assert "session ID" in str(error)
+            else:
+                raise AssertionError("default must never claim an intervention")
+        finally:
+            await connection.close()
+
+    asyncio.run(scenario())
+
+
+def test_supervisor_does_not_send_intervention_to_default():
+    async def scenario():
+        class MustNotBeCalled:
+            async def enqueue(self, *args, **kwargs):
+                raise AssertionError("intervention must be rejected before enqueue")
+
+        class Memory:
+            async def search(self, **kwargs):
+                raise AssertionError("invalid session must be rejected before memory access")
+
+        state = {
+            "root_session_id": "default",
+            "claimed_events": [{"id": "event-1", "cycle_id": "cycle-1"}],
+            "intervention_message": "Do not send this.",
+            "process_context": {"key": {"evidence_category_id": "evidence"}},
+        }
+        node = make_send_intervention(
+            object(),
+            Memory(),
+            pending_interventions=MustNotBeCalled(),
+        )
+        with pytest.raises(ValueError, match="root_session_id"):
+            await node(state)
+
+    asyncio.run(scenario())
+
+
+def test_supervisor_intervention_is_retrieved_only_by_its_real_session(tmp_path):
+    async def scenario():
+        connection = await open_connection(tmp_path / "supervisor.db")
+        repository = PendingInterventionRepository(connection)
+        await repository.initialize()
+
+        class OpenCode:
+            async def send_message(self, session_id, message):
+                raise AssertionError("system-transform delivery should use the session queue")
+
+        class Memory:
+            async def search(self, **kwargs):
+                return []
+
+            async def create(self, value):
+                return {"id": "audit-1", **value}
+
+            async def update(self, memory_id, value):
+                return {"id": memory_id, **value}
+
+        state = {
+            "root_session_id": "ses_target-session",
+            "claimed_events": [{"id": "event-1", "cycle_id": "cycle-1"}],
+            "intervention_message": "Validate the focused change.",
+            "process_context": {"key": {"evidence_category_id": "evidence"}},
+        }
+        try:
+            result = await make_send_intervention(
+                OpenCode(),
+                Memory(),
+                pending_interventions=repository,
+            )(state)
+            assert result["intervention_result"]["session_id"] == "ses_target-session"
+            assert await repository.claim("ses_other-session") is None
+            claimed = await repository.claim("ses_target-session")
+            assert claimed is not None
+            assert claimed["session_id"] == "ses_target-session"
+            assert claimed["message"] == result["intervention_result"]["message"]
+        finally:
+            await connection.close()
 
     asyncio.run(scenario())
 

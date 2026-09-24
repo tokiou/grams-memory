@@ -131,7 +131,7 @@ class InboxRepository:
                 (id, session_id, root_session_id, type, source_event, payload, status, received_at,
                  available_at, run_id, source_run_id, instance_id, sequence, ingress_id)
                 VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, NULL, ?, ?, ?, ?)""",
-                    (event_id, event.session_id, event.root_session_id or "default", event.type,
+                    (event_id, event.session_id, event.root_session_id, event.type,
                      event.source_event, json.dumps(event.payload, ensure_ascii=False, allow_nan=False), _stamp(received_at),
                      _stamp(received_at), event.run_id, event.instance_id, event.sequence, event.ingress_id),
                 )
@@ -142,7 +142,7 @@ class InboxRepository:
                     (id, session_id, root_session_id, type, source_event, payload, status, received_at,
                      available_at, run_id, source_run_id, instance_id, sequence, ingress_id)
                     VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, NULL, ?, ?, ?, ?)""",
-                    (event_id, event.session_id, event.root_session_id or "default", event.type,
+                    (event_id, event.session_id, event.root_session_id, event.type,
                      event.source_event, json.dumps(event.payload, ensure_ascii=False, allow_nan=False), _stamp(received_at),
                      _stamp(received_at), event.run_id, event.instance_id, event.sequence, event.ingress_id),
                 )

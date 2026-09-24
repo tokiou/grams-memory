@@ -1,5 +1,8 @@
 {
   "name": "grams-opencode-receiver",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  }
 }

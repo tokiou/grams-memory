@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from supervisor.interventions import PendingInterventionRepository
 from supervisor.observability import emit
+from supervisor.session_identity import validate_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,10 @@ def register_intervention_routes(app: FastAPI) -> None:
     async def claim_intervention(request: Request):
         body = await _json_object(request)
         session_id = body.get("session_id") if body else None
-        if not isinstance(session_id, str) or not session_id.strip():
-            return JSONResponse(status_code=400, content={"detail": "session_id is required"})
+        try:
+            session_id = validate_session_id(session_id)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "a valid session_id is required"})
         try:
             result = await request.app.state.interventions.claim(session_id)
         except Exception:
@@ -56,7 +59,11 @@ def register_intervention_routes(app: FastAPI) -> None:
         body = await _json_object(request)
         session_id = body.get("session_id") if body else None
         claim_token = body.get("claim_token") if body else None
-        if not all(isinstance(value, str) and value.strip() for value in (session_id, claim_token)):
+        try:
+            session_id = validate_session_id(session_id)
+        except ValueError:
+            session_id = None
+        if not isinstance(session_id, str) or not isinstance(claim_token, str) or not claim_token.strip():
             return JSONResponse(
                 status_code=400,
                 content={"detail": "session_id and claim_token are required"},

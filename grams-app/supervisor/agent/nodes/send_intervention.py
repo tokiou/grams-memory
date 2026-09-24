@@ -13,6 +13,7 @@ from supervisor.interventions.repository import PendingInterventionRepository
 from supervisor.memory.client import MemoryClient, _field
 from supervisor.opencode.client import OpenCodeClient
 from supervisor.observability import emit
+from supervisor.session_identity import validate_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,7 @@ def make_send_intervention(
         session_id = state.get("root_session_id")
         message = state.get("intervention_message")
         category_id = state.get("process_context", {}).get("key", {}).get("evidence_category_id")
-        if not isinstance(session_id, str) or not session_id:
-            raise ValueError("root_session_id is required to send an intervention")
+        session_id = validate_session_id(session_id, field_name="root_session_id")
         if not isinstance(message, str) or not message.strip():
             raise ValueError("intervention_message is required")
         if not category_id:

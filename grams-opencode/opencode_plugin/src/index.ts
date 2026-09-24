@@ -7,6 +7,28 @@ type PendingIntervention = {
   claim_token: string
 }
 
+function isTrustworthySessionID(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value === value.trim() &&
+    value !== "default"
+  )
+}
+
+function eventSessionValue(value: unknown): unknown {
+  const event = firstRecord(value)
+  const properties = firstRecord(event.properties, event.data)
+  const part = firstRecord(properties.part, event.part)
+  const input = firstRecord(event.input)
+  return event.sessionID ?? properties.sessionID ?? part.sessionID ?? input.sessionID
+}
+
+function eventSessionID(value: unknown): string | undefined {
+  const sessionID = eventSessionValue(value)
+  return isTrustworthySessionID(sessionID) ? sessionID : undefined
+}
+
 const endpoint = process.env.GRAMS_EVENT_ENDPOINT
 const interventionEndpoint = process.env.GRAMS_INTERVENTION_ENDPOINT
 
@@ -85,31 +107,42 @@ function normalize(
   kind: string,
   value: unknown,
   type = kind.toUpperCase().replaceAll(".", "_"),
+  correlatedSessionID?: string,
 ): OpenCodeEvent {
   const event = firstRecord(value)
-  const properties = firstRecord(event.properties, event.data)
-  const part = firstRecord(properties.part, event.part)
-  const input = firstRecord(event.input)
 
   return {
     schema_version: 1,
     type,
     source_event: kind,
     timestamp: new Date().toISOString(),
-    session_id: event.sessionID ?? properties.sessionID ?? part.sessionID ?? input.sessionID ?? null,
+    session_id: correlatedSessionID ?? eventSessionID(event) ?? null,
     payload: value,
   }
 }
 
 async function emit(event: OpenCodeEvent): Promise<void> {
   if (!endpoint) return
+  const sessionID = event.session_id
+  if (
+    typeof sessionID !== "string" ||
+    !sessionID.trim() ||
+    sessionID !== sessionID.trim() ||
+    sessionID === "default"
+  ) {
+    console.error("GRAMS event dropped: missing or invalid session ID", event.type)
+    return
+  }
 
   try {
-    await fetch(endpoint, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(event),
     })
+    if (!response.ok) {
+      console.error("GRAMS receiver rejected event", response.status, event.type)
+    }
   } catch (error) {
     console.error("GRAMS receiver unavailable", error)
   }
@@ -121,6 +154,17 @@ export const GramsReceiver = async () => {
   const assistantMessages = new Map<string, Set<string>>()
   const userMessages = new Map<string, Set<string>>()
   const sessions = new Set<string>()
+  // file.edited is a global event and may omit sessionID. Correlate it only
+  // while a single session has an active tool invocation; never use recency.
+  const activeToolSessions = new Map<string, string>()
+
+  const toolInvocationKey = (sessionID: string, callID: string): string =>
+    JSON.stringify([sessionID, callID])
+
+  const activeSessionForFileEdit = (): string | undefined => {
+    const activeSessions = new Set(activeToolSessions.values())
+    return activeSessions.size === 1 ? activeSessions.values().next().value : undefined
+  }
 
   const heartbeat = async (): Promise<void> => {
     for (const sessionID of sessions) {
@@ -294,13 +338,29 @@ export const GramsReceiver = async () => {
         const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : undefined
         if (sessionID) {
           sessions.add(sessionID)
+          for (const [key, activeSessionID] of activeToolSessions) {
+            if (activeSessionID === sessionID) activeToolSessions.delete(key)
+          }
           await flushSession(sessionID)
         }
         return
       }
 
       if (kind === "file.edited") {
-        await emit(normalize(kind, event, "FILE_CHANGE_FINAL"))
+        const explicitSessionID = eventSessionValue(event)
+        const sessionID = isTrustworthySessionID(explicitSessionID)
+          ? explicitSessionID
+          : explicitSessionID == null
+            ? activeSessionForFileEdit()
+            : undefined
+        if (!sessionID) {
+          console.error(
+            "GRAMS file.edited dropped: no unique active tool session",
+            firstRecord(event.properties).file,
+          )
+          return
+        }
+        await emit(normalize(kind, event, "FILE_CHANGE_FINAL", sessionID))
         return
       }
 
@@ -313,16 +373,31 @@ export const GramsReceiver = async () => {
       input: Record<string, unknown>,
       output: Record<string, unknown>,
     ) => {
+      const sessionID = input.sessionID
+      const callID = input.callID
+      if (isTrustworthySessionID(sessionID)) {
+        sessions.add(sessionID)
+        if (typeof callID === "string" && callID.length > 0) {
+          activeToolSessions.set(toolInvocationKey(sessionID, callID), sessionID)
+        }
+      }
       await emit(normalize("tool.execute.before", { input, output }, "TOOL_CALL_FINAL"))
-      if (typeof input.sessionID === "string") sessions.add(input.sessionID)
     },
 
     "tool.execute.after": async (
       input: Record<string, unknown>,
       output: Record<string, unknown>,
     ) => {
+      const sessionID = input.sessionID
+      const callID = input.callID
+      if (
+        isTrustworthySessionID(sessionID) &&
+        typeof callID === "string" &&
+        callID.length > 0
+      ) {
+        activeToolSessions.delete(toolInvocationKey(sessionID, callID))
+      }
       await emit(normalize("tool.execute.after", { input, output }, "TOOL_RESULT_FINAL"))
-      if (typeof input.sessionID === "string") sessions.add(input.sessionID)
     },
   }
 }

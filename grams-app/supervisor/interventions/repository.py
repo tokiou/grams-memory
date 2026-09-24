@@ -8,6 +8,8 @@ import uuid
 
 import aiosqlite
 
+from supervisor.session_identity import validate_session_id
+
 
 class InterventionStatus:
     PENDING = "PENDING"
@@ -83,8 +85,7 @@ class PendingInterventionRepository:
         *,
         initial_status: str = InterventionStatus.PENDING,
     ) -> dict[str, object]:
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ValueError("session_id is required")
+        session_id = validate_session_id(session_id)
         if not isinstance(message, str) or not message.strip():
             raise ValueError("message is required")
         if not isinstance(delivery_key, str) or not delivery_key.strip():
@@ -136,8 +137,7 @@ class PendingInterventionRepository:
         return self._row(row)
 
     async def claim(self, session_id: str) -> dict[str, object] | None:
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ValueError("session_id is required")
+        session_id = validate_session_id(session_id)
 
         async with self._write_lock:
             now = datetime.now(timezone.utc)

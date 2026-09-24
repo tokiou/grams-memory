@@ -48,3 +48,14 @@ def test_intervention_api_rejects_missing_session_id():
     with temporary_directory, TestClient(create_app(config)) as client:
         response = client.post("/interventions/claim", json={})
         assert response.status_code == 400
+
+
+def test_intervention_api_rejects_default_session_id():
+    temporary_directory = tempfile.TemporaryDirectory()
+    config = Config(Path(temporary_directory.name) / "supervisor.db")
+    with temporary_directory, TestClient(create_app(config)) as client:
+        assert client.post("/interventions/claim", json={"session_id": "default"}).status_code == 400
+        assert client.post(
+            "/interventions/intervention-1/consume",
+            json={"session_id": "default", "claim_token": "token"},
+        ).status_code == 400
