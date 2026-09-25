@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from supervisor.agent.state import SupervisorState
 from supervisor.agent.nodes.load_process_context import load_process_context
 from supervisor.agent.schemas import RELATION_TYPES
+from supervisor.agent.state_builder import build_jev_process_state
 from supervisor.memory.client import MemoryClient, _field
+from supervisor.observability import emit
+
+
+logger = logging.getLogger(__name__)
 
 
 def _scoped_memory_ids(state: SupervisorState) -> set[str]:
@@ -137,10 +143,19 @@ def make_expand_graph(memory: MemoryClient, *, max_depth: int = 3):
             "category_pages": category_pages,
             "category_page_exhausted": category_page_exhausted,
         })
+        before = build_jev_process_state(state).get("expanded_memory") or {}
+        after = build_jev_process_state({**state, "expanded_memory_context": expanded}).get("expanded_memory") or {}
+        # A change to pagination bookkeeping alone is not new evidence for
+        # another identical JEV assessment. Empty views are equivalent.
+        changed = any((before.get(key) or {}) != (after.get(key) or {}) for key in (
+            "memories", "subgraphs", "related_processes", "summaries", "category_pages",
+        ))
+        if not changed:
+            emit(logger, logging.INFO, "memory_expansion_exhausted", depth=depth, reason="unchanged_jev_context")
         return {
             "expanded_memory_context": expanded,
             "memory_expansion_depth": depth,
-            "memory_expansion_exhausted": False,
+            "memory_expansion_exhausted": not changed,
         }
 
     return node

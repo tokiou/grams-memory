@@ -68,7 +68,7 @@ def build_graph(
     graph.add_node("CURATE_MEMORY_CANDIDATES", make_curate_memory_candidates(jev))
     graph.add_node("MATERIALIZE_MEMORIES", make_materialize_memories(openrouter))
     graph.add_node("APPLY_MEMORY_UPDATE", make_apply_memory_update(memory))
-    graph.add_node("SUPERVISION_DECISION", make_supervision_decision(jev))
+    graph.add_node("SUPERVISION_DECISION", make_supervision_decision(jev, max_expansion_depth=max_expansion_depth))
     graph.add_node("EXPAND_GRAPH", make_expand_graph(memory, max_depth=max_expansion_depth))
     graph.add_node("WRITE_PROCESS_SUMMARY", make_write_process_summary(openrouter))
     graph.add_node("CLOSE_CURRENT_PROCESS", make_close_current_process(process_service, memory))

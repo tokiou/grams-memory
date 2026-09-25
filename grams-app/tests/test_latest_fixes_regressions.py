@@ -170,30 +170,30 @@ def test_cycle_tagged_memory_is_reused_after_process_context_reload():
             "project_id": "project-1",
             "active_process_id": "process-1",
         })
-        with pytest.raises(RuntimeError, match="conflicts with the durable cycle proposal"):
-            await apply_update({
-                **reloaded,
-                "claimed_events": claim,
-                "proposed_memory_update": {
-                    "memories": [
-                        {
-                            "category": "STRATEGY",
-                            "title": "Plan A",
-                            "content": "Try A",
-                            "candidate_ref": "new_1",
-                        },
-                        {
-                            "category": "STRATEGY",
-                            "title": "Reworded plan",
-                            "content": "Try A more carefully",
-                            "candidate_ref": "new_2",
-                        },
-                    ],
-                    "relations": [],
-                },
-            })
+        retried = await apply_update({
+            **reloaded,
+            "claimed_events": claim,
+            "proposed_memory_update": {
+                "memories": [
+                    {
+                        "category": "STRATEGY",
+                        "title": "Plan A",
+                        "content": "Try A",
+                        "candidate_ref": "new_1",
+                    },
+                    {
+                        "category": "STRATEGY",
+                        "title": "Reworded plan",
+                        "content": "Try A more carefully",
+                        "candidate_ref": "new_2",
+                    },
+                ],
+                "relations": [],
+            },
+        })
 
         assert len(memory.memories) == 1
+        assert retried["memory_update_result"]["resolved_refs"] == {"new_1": "m1", "new_2": "m1"}
 
     asyncio.run(scenario())
 

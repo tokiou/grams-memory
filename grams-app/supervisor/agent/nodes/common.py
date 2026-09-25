@@ -65,7 +65,9 @@ def typed_answer(value: Any) -> dict[str, Any]:
         raise RuntimeError("Jev answer must include confidence")
     if any(not 0 <= float(probability) <= 1 for probability in probabilities.values()):
         raise RuntimeError("Jev probabilities must be between zero and one")
-    if abs(sum(float(probability) for probability in probabilities.values()) - 1.0) > 0.01:
+    # The provider rounds choice probabilities; permit a one-point rounding
+    # difference without rejecting 0.33 + 0.33 + 0.33 due to float error.
+    if abs(sum(float(probability) for probability in probabilities.values()) - 1.0) > 0.010000001:
         raise RuntimeError("Jev probabilities must form a complete distribution")
     if not 0 <= float(confidence) <= 1:
         raise RuntimeError("Jev confidence must be between zero and one")

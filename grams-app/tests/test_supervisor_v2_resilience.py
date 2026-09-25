@@ -15,6 +15,7 @@ from supervisor.agent.nodes.common import cycle_key
 from supervisor.agent.prompts import format_intervention_for_agent
 from supervisor.agent.nodes.expand_graph import make_expand_graph
 from supervisor.agent.runtime import SupervisorRuntime
+from supervisor.agent.services.jev_service import JevClient
 from supervisor.agent.services.process_service import ProcessService
 from supervisor.agent.worker import SupervisorWorker
 from supervisor.inbox import EventInbox, InboxRepository
@@ -47,6 +48,54 @@ def test_atomic_batch_ack_rejects_stale_leases_without_partial_updates(tmp_path)
             assert await inbox.ack_batch(claims) is True
             assert await inbox.ack_batch([(claims[0][0], "stale")]) is False
         finally:
+            await connection.close()
+
+    asyncio.run(scenario())
+
+
+def test_irreducible_jev_request_uses_bounded_inbox_failures(tmp_path):
+    async def scenario():
+        connection = await open_connection(tmp_path / "budget.db")
+        repository = InboxRepository(connection, max_attempts=2)
+        inbox = EventInbox(repository)
+        await inbox.initialize()
+        await inbox.persist(SupervisorEventInput(
+            id="e-budget", payload={"type": "TEXT_FINAL"}, type="TEXT_FINAL", source_event=None,
+            session_id="root", root_session_id="root",
+        ))
+        posted = []
+
+        def handler(request):
+            posted.append(request)
+            return httpx.Response(200, json={"answers": {}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test", http=http, max_context_tokens=100)
+
+        class Graph:
+            async def ainvoke(self, state):
+                await client.system_one(
+                    state={"task": {"objective": "solve"}},
+                    questions={"decision": {"type": "choice", "instructions": "x" * 200}},
+                )
+
+        runtime = SupervisorRuntime(Graph(), inbox)
+        try:
+            with pytest.raises(ValueError, match="request byte limit"):
+                await runtime.run_cycle("root", original_task="solve")
+            first = await repository.get_event("e-budget")
+            assert first.status is EventStatus.PENDING
+            assert first.retry_count == 1
+            await asyncio.sleep(.06)
+            with pytest.raises(ValueError, match="request byte limit"):
+                await runtime.run_cycle("root", original_task="solve")
+            last = await repository.get_event("e-budget")
+            assert last.status is EventStatus.FAILED
+            assert last.retry_count == 2
+            assert await inbox.claim_pending("root") == []
+            assert posted == []
+        finally:
+            await http.aclose()
             await connection.close()
 
     asyncio.run(scenario())
@@ -268,6 +317,72 @@ def test_unknown_intervention_cannot_be_recorded_or_acked():
     asyncio.run(scenario())
 
 
+def test_send_intervention_recovers_audit_after_create_response_was_lost():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.audit = None
+                self.created = 0
+
+            async def search(self, *, category_id, query, limit):
+                return [self.audit] if self.audit and query in self.audit["title"] else []
+
+            async def create(self, payload):
+                self.created += 1
+                self.audit = {"id": "audit-1", **payload}
+                raise RuntimeError("create response lost after durable write")
+
+            async def update(self, memory_id, payload):
+                self.audit.update(payload)
+                return self.audit
+
+        class OpenCode:
+            def __init__(self):
+                self.sent = []
+
+            async def send_message(self, session_id, message):
+                self.sent.append((session_id, message))
+                return {"accepted": True}
+
+        state = {
+            "root_session_id": "session-1",
+            "claimed_events": [{"id": "event-1", "cycle_id": "cycle-aaaaaaaaaaaaaaaaaaaa"}],
+            "process_context": {"key": {"evidence_category_id": "evidence"}},
+            "intervention_message": "Reconsider the failed approach.",
+        }
+        memory = Memory()
+        opencode = OpenCode()
+        node = make_send_intervention(opencode, memory, fallback_mode="prompt_async")
+        with pytest.raises(RuntimeError, match="response lost"):
+            await node(state)
+        recovered = await node(state)
+        await make_record_intervention(memory)({**state, **recovered})
+        assert recovered["intervention_result"]["audit_memory_id"] == "audit-1"
+        assert memory.created == 1
+        assert memory.audit["title"] == "Supervisor intervention [cycle-aaaaaaaaaaaaaaaaaaaa]"
+        assert len(opencode.sent) == 1
+
+    asyncio.run(scenario())
+
+
+def test_record_intervention_never_creates_a_second_audit():
+    async def scenario():
+        class Memory:
+            async def create(self, payload):
+                raise AssertionError("SEND_INTERVENTION owns durable audit creation")
+
+        node = make_record_intervention(Memory())
+        state = {"intervention_result": {"delivered": True, "message": "Reconsider."}}
+        with pytest.raises(RuntimeError, match="SEND_INTERVENTION must persist"):
+            await node(state)
+        result = await node({"intervention_result": {
+            **state["intervention_result"], "audit_recorded": True, "audit_memory_id": "audit-1",
+        }})
+        assert result["intervention_result"]["audit_memory_id"] == "audit-1"
+
+    asyncio.run(scenario())
+
+
 def test_process_service_recovers_superseded_transition_and_terminal_retry():
     async def scenario():
         class Memory:
@@ -297,6 +412,7 @@ def test_process_service_recovers_superseded_transition_and_terminal_retry():
                 return process
 
             async def search(self, query="", **kwargs):
+                assert query == "cycle-1"
                 return [{"title": f"Process summary [{query}]: SUCCEEDED"}] if self.status == "SUCCEEDED" else []
 
         superseded = await ProcessService(Memory("SUPERSEDED")).ensure_active("project", "cycle-1")
@@ -323,6 +439,7 @@ def test_process_service_recovers_superseded_transition_and_terminal_retry():
                 }
 
             async def search(self, query="", **kwargs):
+                assert query == "cycle-aaaaaaaaaaaaaaaaaaaa"
                 return [{"title": f"Process summary [{query}]: SUCCEEDED"}]
 
             async def close_process(self, process_id, status):
@@ -336,6 +453,25 @@ def test_process_service_recovers_superseded_transition_and_terminal_retry():
         )
         assert resumed["status"] == "SUCCEEDED"
         assert resumed["cycle_complete"] is True
+
+    asyncio.run(scenario())
+
+
+def test_process_service_ignores_cycle_intervention_audit_during_replay():
+    async def scenario():
+        class Memory:
+            async def get_active_process(self, project_id):
+                return {"id": "p1", "project_id": project_id, "key_id": "k1", "name": "process_001", "status": "ACTIVE"}
+
+            async def search(self, query="", **kwargs):
+                return [{"id": "audit-1", "title": "Supervisor intervention [cycle-aaaaaaaaaaaaaaaaaaaa]"}]
+
+            async def close_process(self, *args):
+                raise AssertionError("intervention audit must not close the process")
+
+        process = await ProcessService(Memory()).ensure_active("project", "cycle-aaaaaaaaaaaaaaaaaaaa")
+        assert process["status"] == "ACTIVE"
+        assert process.get("cycle_complete") is not True
 
     asyncio.run(scenario())
 

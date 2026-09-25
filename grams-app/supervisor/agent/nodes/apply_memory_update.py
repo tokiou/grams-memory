@@ -81,8 +81,6 @@ def make_apply_memory_update(memory: MemoryClient):
             raise ValueError("process context has no writable STRATEGY and EVIDENCE categories")
 
         existing_by_identity: dict[tuple[str, str, str], str] = {}
-        existing_metadata_by_identity: dict[tuple[str, str, str], tuple[Any, ...] | None] = {}
-        existing_cycle_provenance: list[tuple[tuple[str, ...], str, tuple[str, str, str]]] = []
         cycle_refs: dict[str, tuple[str, tuple[str, str, str]]] = {}
         marker = cycle_key(state) if state.get("claimed_events") else None
         scoped_ids: set[str] = set()
@@ -102,13 +100,6 @@ def make_apply_memory_update(memory: MemoryClient):
                 )
                 existing_by_identity[identity] = str(memory_id)
                 description = str(_field(value, "description") or "")
-                existing_metadata_by_identity[identity] = _curation_metadata(description)
-                if marker and description.startswith(f"{marker}:"):
-                    envelope = _curation_envelope(description)
-                    provenance = envelope.get("provenance") if envelope else None
-                    source_event_ids = provenance.get("source_event_ids") if isinstance(provenance, dict) else None
-                    if isinstance(source_event_ids, list) and all(isinstance(item, str) for item in source_event_ids):
-                        existing_cycle_provenance.append((tuple(sorted(source_event_ids)), str(memory_id), identity))
                 if marker and description.startswith(f"{marker}:"):
                     identity = _identity(
                         category,
@@ -154,12 +145,6 @@ def make_apply_memory_update(memory: MemoryClient):
                         if candidate_ref:
                             cycle_refs[candidate_ref] = (str(memory_id), identity)
                     existing_by_identity[identity] = str(memory_id)
-                    existing_metadata_by_identity[identity] = _curation_metadata(description)
-                    envelope = _curation_envelope(description)
-                    provenance = envelope.get("provenance") if envelope else None
-                    source_event_ids = provenance.get("source_event_ids") if isinstance(provenance, dict) else None
-                    if marker and isinstance(source_event_ids, list) and all(isinstance(item, str) for item in source_event_ids):
-                        existing_cycle_provenance.append((tuple(sorted(source_event_ids)), str(memory_id), identity))
 
         existing_relations = {
             (
@@ -175,34 +160,13 @@ def make_apply_memory_update(memory: MemoryClient):
         canonical_targets: dict[str, tuple[str, Any]] = {}
         planned_groups: dict[tuple[str, str, str], dict[str, Any]] = {}
         planned_group_refs: dict[tuple[str, str, str], list[str]] = {}
-        planned_group_metadata: dict[tuple[str, str, str], tuple[Any, ...]] = {}
         for candidate in proposal["memories"]:
             identity = _identity(candidate["category"], candidate["title"], candidate["content"])
-            metadata_identity = tuple(candidate.get(key) for key in (
-                "role", "status", "confidence", "progress_effect", "importance", "provenance",
-            ))
-            if marker and any(key in candidate for key in (
-                "role", "status", "confidence", "progress_effect", "importance", "provenance",
-            )):
-                candidate_sources = candidate.get("provenance", {}).get("source_event_ids") or []
-                provenance_matches = [item for item in existing_cycle_provenance if item[0] == tuple(sorted(candidate_sources))]
-                if provenance_matches and any(item[2] != identity for item in provenance_matches):
-                    raise RuntimeError("cycle already contains a different curated materialization for this provenance")
-            existing_metadata = existing_metadata_by_identity.get(identity)
-            if existing_metadata is not None and any(key in candidate for key in (
-                "role", "status", "confidence", "progress_effect", "importance", "provenance",
-            )) and existing_metadata != metadata_identity:
-                raise RuntimeError("existing memory has incompatible curation metadata")
-            if existing_metadata is None and any(key in candidate for key in (
-                "role", "status", "confidence", "progress_effect", "importance", "provenance",
-            )) and identity in existing_by_identity:
-                raise RuntimeError("legacy memory cannot satisfy a curated metadata proposal")
-            if identity in planned_group_metadata and planned_group_metadata[identity] != metadata_identity:
-                raise RuntimeError("duplicate memory proposal has incompatible curation metadata")
-            planned_group_metadata[identity] = metadata_identity
+            # Identity is the deduplication key; curation/provenance describes
+            # the first persisted memory, not a mutable constraint on future
+            # observations of the same fact. Candidate refs, not event IDs,
+            # identify distinct facts extracted from one execution event.
             tagged = cycle_refs.get(candidate["candidate_ref"])
-            if tagged and tagged[1] != identity:
-                raise RuntimeError("regenerated memory proposal conflicts with the durable cycle proposal")
             if tagged:
                 canonical_targets[candidate["candidate_ref"]] = ("existing", tagged[0])
             elif identity in existing_by_identity:

@@ -430,13 +430,284 @@ def test_jev_client_rejects_questions_that_leave_no_request_budget():
 
         http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         client = JevClient(api_key="test-key", http=http, max_context_tokens=100)
-        with pytest.raises(ValueError, match="request byte limit"):
+        with pytest.raises(ValueError, match="Jev question 'decision' cannot fit"):
             await client.system_one(
                 state={"task": {"objective": "solve"}},
                 questions={"decision": {"type": "noul", "instructions": "x" * 200}},
             )
         await http.aclose()
         assert calls == 0
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_compacts_long_objective_before_splitting_questions():
+    async def scenario():
+        calls = 0
+
+        def handler(request):
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, json={"answers": {}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=500)
+        await client.system_one(
+                state={"task": {"objective": "x" * 1000}},
+                questions={
+                    "first": {"type": "noul", "instructions": "first"},
+                    "second": {"type": "noul", "instructions": "second"},
+                },
+        )
+        await http.aclose()
+        assert calls >= 1
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_compacts_long_candidates_and_keeps_addressed_candidate():
+    async def scenario():
+        bodies = []
+
+        def handler(request):
+            assert len(request.content) <= 850
+            body = json.loads(request.content)
+            bodies.append(body)
+            return httpx.Response(200, json={"answers": {name: {"value": "KEEP"} for name in body["questions"]}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=850)
+        result = await client.system_one(
+            state={"memory_candidates": [
+                {"candidate_ref": "new_1", "fact": "a" * 2500},
+                {"candidate_ref": "new_2", "fact": "b" * 2500},
+            ]},
+            questions={"new_1_keep": {"type": "choice", "criteria": {"KEEP": "yes", "DROP": "no"}}},
+        )
+        await http.aclose()
+        assert result["answers"]["new_1_keep"]["value"] == "KEEP"
+        assert len(bodies) == 1
+        assert [item["candidate_ref"] for item in bodies[0]["state"]["memory_candidates"]] == ["new_1"]
+        assert bodies[0]["state"]["context_compaction"]["truncated"] is True
+
+    asyncio.run(scenario())
+
+
+def test_jev_split_relation_target_retains_all_candidate_choices_in_context():
+    async def scenario():
+        seen = []
+
+        def handler(request):
+            assert len(request.content) <= 700
+            body = json.loads(request.content)
+            seen.append(body)
+            return httpx.Response(200, json={"answers": {name: {"value": "NONE"} for name in body["questions"]}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=700)
+        questions = {
+            "new_1_keep": {"type": "choice", "criteria": {"KEEP": "yes", "DROP": "no"}, "instructions": "k" * 270},
+            "new_1_relation_target": {"type": "choice", "criteria": {
+                "NONE": "nothing", "new_2": "the other candidate",
+            }, "instructions": "r" * 270},
+        }
+        await client.system_one(state={"memory_candidates": [
+            {"candidate_ref": "new_1", "fact": "primary"},
+            {"candidate_ref": "new_2", "fact": "related fact"},
+        ]}, questions=questions)
+        await http.aclose()
+        relation_requests = [body for body in seen if "new_1_relation_target" in body["questions"]]
+        assert relation_requests
+        assert len(seen) == 2
+        assert all({item["candidate_ref"] for item in body["state"]["memory_candidates"]} == {"new_1", "new_2"}
+                   for body in relation_requests)
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_splits_oversized_question_sets_without_dropping_questions():
+    async def scenario():
+        requests = []
+
+        def handler(request):
+            body = json.loads(request.content)
+            requests.append(body)
+            return httpx.Response(200, json={
+                "answers": {name: {"value": name} for name in body["questions"]},
+                "usage": {"input_tokens": 10, "details": {"cached_tokens": 2}},
+                "batch_marker": len(requests),
+                **{f"batch_{name}": name for name in body["questions"]},
+            })
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=260)
+        state = {"task": {"objective": "solve"}}
+        original_state = json.loads(json.dumps(state))
+        questions = {
+            "first": {
+                "type": "choice",
+                "criteria": {"YES": "accept", "NO": "reject"},
+                "instructions": "x" * 60,
+            },
+            "second": {
+                "type": "choice",
+                "criteria": {"YES": "accept", "NO": "reject"},
+                "instructions": "y" * 60,
+            },
+        }
+
+        result = await client.system_one(state=state, questions=questions)
+        await http.aclose()
+
+        assert len(requests) == 2
+        assert all(len(json.dumps(body, separators=(",", ":")).encode()) <= 260 for body in requests)
+        assert {
+            name: question
+            for body in requests
+            for name, question in body["questions"].items()
+        } == questions
+        assert result["answers"] == {"first": {"value": "first"}, "second": {"value": "second"}}
+        assert result["usage"] == {"input_tokens": 20, "details": {"cached_tokens": 4}}
+        assert result["batch_marker"] == 2
+        assert result["batch_first"] == "first"
+        assert result["batch_second"] == "second"
+        assert state == original_state
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_rejects_missing_answers_after_question_splitting():
+    async def scenario():
+        def handler(request):
+            body = json.loads(request.content)
+            name = next(iter(body["questions"]))
+            answers = {} if name == "second" else {name: {"value": name}}
+            return httpx.Response(200, json={"answers": answers})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=260)
+        with pytest.raises(RuntimeError, match="incomplete answers for split question batches"):
+            await client.system_one(
+                state={"task": {"objective": "solve"}},
+                questions={
+                    "first": {"type": "noul", "instructions": "x" * 100},
+                    "second": {"type": "noul", "instructions": "y" * 100},
+                },
+            )
+        await http.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_compacts_progressively_after_provider_size_rejection():
+    async def scenario():
+        requests = []
+
+        def handler(request):
+            body = json.loads(request.content)
+            requests.append(body)
+            if len(requests) == 1:
+                return httpx.Response(400, text="maximum context length exceeded")
+            if len(requests) < 3:
+                return httpx.Response(413, text="request payload too large")
+            return httpx.Response(200, json={"answers": {"decision": {"value": "continue"}}})
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=2000)
+        state = {
+            "recent_execution": [
+                {"id": str(index), "result": "x" * 180}
+                for index in range(8)
+            ],
+        }
+        original_state = json.loads(json.dumps(state))
+        result = await client.system_one(
+            state=state,
+            questions={"decision": {"type": "noul", "instructions": "continue?"}},
+        )
+        await http.aclose()
+
+        assert len(requests) == 3
+        request_sizes = [len(json.dumps(body, separators=(",", ":")).encode()) for body in requests]
+        assert request_sizes[0] > request_sizes[1] > request_sizes[2]
+        assert all(size <= 2000 for size in request_sizes)
+        assert result["answers"]["decision"]["value"] == "continue"
+        assert state == original_state
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_splits_questions_after_size_rejection_when_state_cannot_shrink():
+    async def scenario():
+        requests = []
+
+        def handler(request):
+            body = json.loads(request.content)
+            requests.append(body)
+            if len(body["questions"]) > 1:
+                return httpx.Response(413, text="request payload too large")
+            return httpx.Response(200, json={
+                "answers": {name: {"value": name} for name in body["questions"]},
+            })
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=1000)
+        result = await client.system_one(
+            state={"task": {"objective": "solve"}},
+            questions={
+                "first": {"type": "noul", "instructions": "first"},
+                "second": {"type": "noul", "instructions": "second"},
+            },
+        )
+        await http.aclose()
+
+        assert len(requests) == 3
+        assert len(requests[0]["questions"]) == 2
+        assert all(len(body["questions"]) == 1 for body in requests[1:])
+        assert result["answers"] == {"first": {"value": "first"}, "second": {"value": "second"}}
+
+    asyncio.run(scenario())
+
+
+def test_jev_client_limits_context_retries_and_does_not_retry_other_http_errors():
+    async def scenario():
+        requests = []
+
+        def handler(request):
+            requests.append(request.content)
+            return httpx.Response(413, text="payload too large")
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=10000)
+        state = {
+            "recent_execution": [
+                {"id": str(index), "result": "x" * 180}
+                for index in range(50)
+            ],
+        }
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.system_one(
+                state=state,
+                questions={"decision": {"type": "noul", "instructions": "continue?"}},
+            )
+        await http.aclose()
+        assert len(requests) == 4  # initial request plus three compacted retries
+
+        requests.clear()
+
+        def invalid_request_handler(request):
+            requests.append(request.content)
+            return httpx.Response(400, text="input tokens field is invalid")
+
+        http = httpx.AsyncClient(transport=httpx.MockTransport(invalid_request_handler))
+        client = JevClient(api_key="test-key", http=http, max_context_tokens=1000)
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.system_one(
+                state={"task": {"objective": "solve"}},
+                questions={"decision": {"type": "noul", "instructions": "continue?"}},
+            )
+        await http.aclose()
+        assert len(requests) == 1
 
     asyncio.run(scenario())
 
@@ -596,6 +867,120 @@ def test_apply_memory_update_persists_curated_metadata_in_mcp_compatible_payload
         assert envelope["progress_effect"] == "NEGATIVE"
         assert envelope["provenance"]["source_event_ids"] == ["event-1"]
         assert result["memory_update_result"]["created_memory_ids"] == ["m-curated"]
+
+    asyncio.run(scenario())
+
+
+def test_apply_memory_update_reuses_existing_fact_without_overwriting_curation():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.created = []
+
+            async def create(self, payload):
+                self.created.append(payload)
+                return {"id": "new-memory", **payload}
+
+        memory = Memory()
+        stored = {
+            "id": "stored", "category_id": "cat-e", "title": "Repeated error",
+            "content": "Same failure recurred", "description": "GRAMS_CURATION_V1:{}",
+        }
+        candidate = {
+            "category": "EVIDENCE", "title": "Repeated error", "content": "Same failure recurred",
+            "candidate_ref": "new_1", "role": "RESULT", "status": "VALIDATED",
+            "confidence": 0.7, "progress_effect": "NEGATIVE", "importance": 0.5,
+            "provenance": {"source_event_ids": ["new-event"]},
+        }
+        result = await make_apply_memory_update(memory)({
+            "claimed_events": [{"id": "new-event", "cycle_id": "new-cycle"}],
+            "process_context": {"category_ids": {"STRATEGY": "cat-s", "EVIDENCE": "cat-e"},
+                                "categories": {"STRATEGY": [], "EVIDENCE": [stored]}, "relations": []},
+            "proposed_memory_update": {"memories": [candidate], "relations": []},
+        })
+        assert memory.created == []
+        assert result["memory_update_result"]["resolved_refs"] == {"new_1": "stored"}
+        assert stored["description"] == "GRAMS_CURATION_V1:{}"
+
+    asyncio.run(scenario())
+
+
+def test_apply_memory_update_replay_uses_durable_candidate_ref_not_shared_event_provenance():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.created = []
+
+            async def create(self, payload):
+                self.created.append(payload)
+                return {"id": "new-memory", **payload}
+
+        memory = Memory()
+        stored = {
+            "id": "stored", "category_id": "cat-e", "title": "Old phrasing", "content": "Old fact",
+            "description": "cycle-1:new_1\nGRAMS_CURATION_V1:{\"version\":1,\"provenance\":{\"source_event_ids\":[\"event-1\"]}}",
+        }
+        def candidate(ref, title):
+            return {"category": "EVIDENCE", "title": title, "content": title,
+                    "candidate_ref": ref, "role": "RESULT", "status": "VALIDATED",
+                    "confidence": 0.8, "progress_effect": "NEUTRAL", "importance": 0.5,
+                    "provenance": {"source_event_ids": ["event-1"]}}
+
+        result = await make_apply_memory_update(memory)({
+            "claimed_events": [{"id": "event-1", "cycle_id": "cycle-1"}],
+            "process_context": {"category_ids": {"STRATEGY": "cat-s", "EVIDENCE": "cat-e"},
+                                "categories": {"STRATEGY": [], "EVIDENCE": [stored]}, "relations": []},
+            "proposed_memory_update": {"memories": [candidate("new_1", "New phrasing"),
+                                                     candidate("new_2", "Different fact")], "relations": []},
+        })
+        assert result["memory_update_result"]["resolved_refs"] == {"new_1": "stored", "new_2": "new-memory"}
+        assert len(memory.created) == 1
+        assert memory.created[0]["title"] == "Different fact"
+
+    asyncio.run(scenario())
+
+
+def test_apply_memory_update_replay_same_candidate_ref_ignores_changed_phrasing_and_metadata():
+    async def scenario():
+        class Memory:
+            def __init__(self):
+                self.created = []
+
+            async def create(self, payload):
+                self.created.append(payload)
+                return {"id": "unexpected-new", **payload}
+
+        memory = Memory()
+        durable_description = (
+            'cycle-1:new_1\nGRAMS_CURATION_V1:{"version":1,"candidate_ref":"new_1",'
+            '"role":"RESULT","status":"VALIDATED","confidence":0.8,'
+            '"progress_effect":"NEGATIVE","importance":0.9,'
+            '"provenance":{"source_event_ids":["event-1"]}}'
+        )
+        stored = {
+            "id": "stored", "category_id": "cat-e", "title": "Original title",
+            "content": "Original durable fact", "description": durable_description,
+        }
+        changed_proposal = {
+            "category": "EVIDENCE", "title": "Regenerated wording", "content": "Rephrased fact",
+            "candidate_ref": "new_1", "role": "ERROR", "status": "REJECTED",
+            "confidence": 0.2, "progress_effect": "POSITIVE", "importance": 0.1,
+            "provenance": {"source_event_ids": ["event-1"], "note": "changed replay metadata"},
+        }
+        result = await make_apply_memory_update(memory)({
+            "claimed_events": [{"id": "event-1", "cycle_id": "cycle-1"}],
+            "process_context": {
+                "category_ids": {"STRATEGY": "cat-s", "EVIDENCE": "cat-e"},
+                "categories": {"STRATEGY": [], "EVIDENCE": [stored]}, "relations": [],
+            },
+            "proposed_memory_update": {"memories": [changed_proposal], "relations": []},
+        })
+
+        assert result["memory_update_result"]["resolved_refs"] == {"new_1": "stored"}
+        assert memory.created == []
+        assert stored["title"] == "Original title"
+        assert stored["content"] == "Original durable fact"
+        assert stored["description"] == durable_description
 
     asyncio.run(scenario())
 

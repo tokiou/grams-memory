@@ -43,6 +43,18 @@ class ProcessService:
     def __init__(self, memory: MemoryClient) -> None:
         self.memory = memory
 
+    async def _cycle_summaries(self, cycle_id: str, project_id: str, key_id: str) -> list[dict[str, Any]]:
+        # Intervention audit records share the cycle marker. They are not
+        # process summaries and must never trigger lifecycle recovery.
+        prefix = f"Process summary [{cycle_id}]: "
+        values = await self.memory.search(
+            cycle_id,
+            project_id=project_id,
+            key_id=key_id,
+            limit=10,
+        )
+        return [item for item in values if str(_field(item, "title") or "").startswith(prefix)]
+
     async def ensure_active(self, project_id: str, cycle_id: str | None = None) -> ProcessReference:
         if not isinstance(project_id, str) or not project_id.strip():
             raise ValueError("project_id is required to find an active process")
@@ -50,16 +62,8 @@ class ProcessService:
         if process is not None:
             active = self._validate_reference(process, project_id=project_id, expected_status="ACTIVE")
             if cycle_id:
-                summaries = await self.memory.search(
-                    cycle_id,
-                    project_id=project_id,
-                    key_id=active["key_id"],
-                    limit=1,
-                )
-                summary = next(
-                    (item for item in summaries if cycle_id in str(_field(item, "title") or "")),
-                    None,
-                )
+                summaries = await self._cycle_summaries(cycle_id, project_id, active["key_id"])
+                summary = next(iter(summaries), None)
                 if summary is not None:
                     match = self._SUMMARY_OUTCOME.match(str(_field(summary, "title") or ""))
                     if match is None:
@@ -80,13 +84,8 @@ class ProcessService:
                     expected_id=predecessor_id,
                     project_id=project_id,
                 )
-                summaries = await self.memory.search(
-                    cycle_id,
-                    project_id=project_id,
-                    key_id=predecessor["key_id"],
-                    limit=1,
-                )
-                if any(cycle_id in str(_field(item, "title") or "") for item in summaries):
+                summaries = await self._cycle_summaries(cycle_id, project_id, predecessor["key_id"])
+                if summaries:
                     active["recovered_transition"] = True
             return active
         processes = await self.memory.list_processes(project_id)
@@ -99,13 +98,8 @@ class ProcessService:
                 successor["recovered_transition"] = True
                 return successor
             if cycle_id:
-                summaries = await self.memory.search(
-                    cycle_id,
-                    project_id=project_id,
-                    key_id=latest["key_id"],
-                    limit=1,
-                )
-                if any(cycle_id in str(_field(item, "title") or "") for item in summaries):
+                summaries = await self._cycle_summaries(cycle_id, project_id, latest["key_id"])
+                if summaries:
                     latest["cycle_complete"] = True
                     return latest
             name = await self.next_process_name(project_id)

@@ -200,6 +200,11 @@ def build_jev_process_state(state: dict[str, Any]) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     strategy = [_memory(item) for item in categories.get("STRATEGY") or []]
     evidence = [_memory(item) for item in categories.get("EVIDENCE") or []]
+    # Memory search is normally newest-first; enforce this when timestamps are
+    # available so compaction never drops a recent memory before an older one.
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    strategy.sort(key=lambda item: _memory_time(item) or oldest, reverse=True)
+    evidence.sort(key=lambda item: _memory_time(item) or oldest, reverse=True)
     strategy_times = [value for item in strategy if (value := _memory_time(item)) is not None]
     evidence_times = [value for item in evidence if (value := _memory_time(item)) is not None]
     latest_strategy = max(strategy_times, default=None)
@@ -286,6 +291,11 @@ def estimate_json_tokens(value: Any) -> int:
 def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, Any]:
     """Keep the highest-value portions of a Jev state within a token budget."""
     compacted = copy.deepcopy(state)
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    for category in ("evidence", "strategy"):
+        items = compacted.get(category)
+        if isinstance(items, list) and all(isinstance(item, dict) for item in items):
+            items.sort(key=lambda item: _memory_time(item) or oldest, reverse=True)
     omitted: dict[str, int] = {}
     omitted_ids: dict[str, list[str]] = {}
 
@@ -314,7 +324,8 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
         elif isinstance(target, list) and target:
             removed = target.pop(-1 if from_end else 0)
             if isinstance(removed, dict) and removed.get("id"):
-                omitted_ids.setdefault(key, []).append(str(removed["id"]))
+                if len(omitted_ids.setdefault(key, [])) < 8:
+                    omitted_ids[key].append(str(removed["id"]))
         else:
             return False
         omitted[key] = omitted.get(key, 0) + 1
@@ -329,10 +340,43 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
         (("expanded_memory", "summaries"), "expanded_summaries", False),
         (("recent_execution",), "recent_execution", False),
         (("relations",), "relations", False),
+        # Selection questions already carry bounded evidence descriptions in
+        # their criteria. This duplicate list must not make reason questions
+        # unsplittable after the choice shortlist has been pruned.
+        (("intervention_evidence",), "intervention_evidence", True),
         # Memory search orders these lists newest-first; preserve recent items.
         (("evidence",), "evidence", True),
         (("strategy",), "strategy", True),
     ]
+    # Removing whole memories is insufficient when the task, a single memory,
+    # or an extracted candidate contains a long tool result. Shrink prose as
+    # a last resort, leaving identifiers, provenance and question definitions
+    # intact. Every reduction is disclosed in context_compaction.
+    text_keys = {"objective", "content", "description", "fact", "excerpt", "text", "result", "title"}
+
+    def shorten_longest_text() -> bool:
+        candidates: list[tuple[int, dict[str, Any], str, str]] = []
+
+        def visit(value: Any, path: str) -> None:
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in text_keys and isinstance(item, str) and len(item) > 160:
+                        candidates.append((len(item.encode("utf-8")), value, key, path + "." + key))
+                    elif isinstance(item, (dict, list)):
+                        visit(item, path + "." + key)
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item, path)
+
+        visit(compacted, "state")
+        if not candidates:
+            return False
+        _, parent, key, path = max(candidates, key=lambda item: item[0])
+        original = parent[key]
+        parent[key] = original[: max(160, len(original) // 2)]
+        omitted[path] = omitted.get(path, 0) + 1
+        return True
+
     while size() > max_tokens:
         changed = False
         for path, key, from_end in drop_paths:
@@ -340,7 +384,8 @@ def compact_jev_state(state: dict[str, Any], *, max_tokens: int) -> dict[str, An
                 changed = True
                 break
         if not changed:
-            break
+            if not shorten_longest_text():
+                break
 
     if omitted:
         compacted["context_compaction"] = {

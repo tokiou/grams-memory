@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from supervisor.agent.nodes.common import answers, jev_call, noul_value, typed_answer
@@ -43,35 +44,74 @@ def _intervention_evidence(state: SupervisorState, base: dict[str, Any]) -> dict
     return evidence
 
 
+def _newest_evidence(evidence: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    # The category search is normally newest-first, but expanded graph nodes
+    # can arrive in a different order. Stable ties preserve the search order.
+    items = list(evidence.items())
+    def timestamp(item: dict[str, Any]) -> datetime | None:
+        value = item.get("updated_at") or item.get("created_at")
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else None
+
+    items.sort(key=lambda pair: timestamp(pair[1]) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return dict(items)
+
+
 async def _select_intervention_evidence(
     jev: JevClient,
     state: SupervisorState,
     base: dict[str, Any],
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-    evidence = _intervention_evidence(state, base)
+    evidence = _newest_evidence(_intervention_evidence(state, base))
+    original_count = len(evidence)
     if not evidence:
         raise RuntimeError("INTERVENE requires at least one in-scope EVIDENCE memory")
-    evidence_criteria = {
-        memory_id: f"{item.get('title', 'Evidence')}: {item.get('content', '')}"[:500]
-        for memory_id, item in evidence.items()
-    }
-    evidence_criteria["NONE"] = "Do not select another evidence memory."
-    questions = {
-        f"evidence_memory_{index}": {
-            "type": "choice",
-            "criteria": evidence_criteria,
-            "instructions": "Select a distinct EVIDENCE memory that directly supports the intervention decision.",
+    def questions_for(candidates: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        criteria = {
+            memory_id: f"{item.get('title', 'Evidence')}: {item.get('content', '')}"[:500]
+            for memory_id, item in candidates.items()
         }
-        for index in range(1, 4)
-    }
-    questions.update({
-        f"intervention_reason_{index}": {
-            "type": "choice",
-            "criteria": {**INTERVENTION_REASON_CRITERIA, "NONE": "Do not select another reason."},
-            "instructions": "Select a controlled explanation for the intervention decision.",
+        criteria["NONE"] = "Do not select another evidence memory."
+        questions = {
+            f"evidence_memory_{index}": {
+                "type": "choice",
+                "criteria": criteria,
+                "instructions": "Select a distinct EVIDENCE memory that directly supports the intervention decision.",
+            }
+            for index in range(1, 4)
         }
-        for index in range(1, 3)
-    })
+        questions.update({
+            f"intervention_reason_{index}": {
+                "type": "choice",
+                "criteria": {**INTERVENTION_REASON_CRITERIA, "NONE": "Do not select another reason."},
+                "instructions": "Select a controlled explanation for the intervention decision.",
+            }
+            for index in range(1, 3)
+        })
+        return questions
+
+    questions = questions_for(evidence)
+    # A batch can be split, but one question with too many options cannot.
+    # Retain the newest options, and keep the selection context in sync with
+    # the choices actually offered. JevClient still guards the exact bytes of
+    # every POST, including all other questions and their criteria.
+    preflight = getattr(jev, "fits_single_question", None)
+    if callable(preflight):
+        while len(evidence) > 1:
+            name = "evidence_memory_1"
+            request_state = {**base, "intervention_evidence": list(evidence.values())}
+            if preflight(state=request_state, name=name, question=questions[name]):
+                break
+            evidence.pop(next(reversed(evidence)))
+            questions = questions_for(evidence)
+    if len(evidence) < original_count:
+        emit(logger, logging.INFO, "jev_intervention_evidence_pruned", retained_count=len(evidence),
+             omitted_count=original_count - len(evidence))
     selected_answers = answers(await jev_call(
         jev,
         {**base, "intervention_evidence": list(evidence.values())},
@@ -81,16 +121,18 @@ async def _select_intervention_evidence(
     for index in range(1, 4):
         selected = typed_answer(selected_answers.get(f"evidence_memory_{index}"))["value"]
         if selected != "NONE":
-            if selected not in evidence or selected in evidence_ids:
-                raise ValueError("Jev selected an invalid or duplicate intervention evidence memory")
-            evidence_ids.append(selected)
+            if selected not in evidence:
+                raise ValueError("Jev selected an invalid intervention evidence memory")
+            if selected not in evidence_ids:
+                evidence_ids.append(selected)
     reasons: list[str] = []
     for index in range(1, 3):
         selected = typed_answer(selected_answers.get(f"intervention_reason_{index}"))["value"]
         if selected != "NONE":
-            if selected not in REASON_CODES or selected in reasons:
-                raise ValueError("Jev selected an invalid or duplicate intervention reason")
-            reasons.append(selected)
+            if selected not in REASON_CODES:
+                raise ValueError("Jev selected an invalid intervention reason")
+            if selected not in reasons:
+                reasons.append(selected)
     if not evidence_ids or not reasons:
         raise ValueError("INTERVENE requires selected evidence and reason codes")
     return evidence_ids, reasons, [evidence[memory_id] for memory_id in evidence_ids]
@@ -123,14 +165,14 @@ def make_supervision_decision(
     action_threshold: float | None = None,
     context_sufficient_threshold: float | None = None,
     outcome_threshold: float | None = None,
+    max_expansion_depth: int = 3,
 ):
+    # Retain the argument for existing callers. Context sufficiency remains a
+    # diagnostic, never an override of Jev's selected action.
+    if not 1 <= max_expansion_depth <= 3:
+        raise ValueError("max_expansion_depth must be between one and three")
     action_threshold = action_threshold if action_threshold is not None else float(
         os.getenv("JEV_ACTION_MIN_CONFIDENCE", "0.6")
-    )
-    context_sufficient_threshold = (
-        context_sufficient_threshold
-        if context_sufficient_threshold is not None
-        else float(os.getenv("JEV_CONTEXT_SUFFICIENT_MIN_PROB", "0.6"))
     )
     outcome_threshold = outcome_threshold if outcome_threshold is not None else float(
         os.getenv("JEV_OUTCOME_MIN_CONFIDENCE", str(action_threshold))
@@ -140,7 +182,6 @@ def make_supervision_decision(
     )
     if not all(0 <= threshold <= 1 for threshold in (
         action_threshold,
-        context_sufficient_threshold,
         outcome_threshold,
         exhausted_intervention_threshold,
     )):
@@ -180,17 +221,24 @@ def make_supervision_decision(
         action_answer = typed_answer(action_answers.get("action"))
         if set(action_answer["probabilities"]) != set(ACTIONS):
             raise RuntimeError("supervision must include the complete action distribution")
-        selected = action_answer["value"]
-        if diagnostics["context_sufficient_probability"] < context_sufficient_threshold:
-            selected = "NEED_MORE_MEMORY"
-        elif action_answer["confidence"] < action_threshold:
-            selected = "CONTINUE"
-        if (
-            selected == "NEED_MORE_MEMORY"
-            and int(state.get("memory_expansion_depth", 0)) >= 3
-            and action_answer["probabilities"]["INTERVENE"] > exhausted_intervention_threshold
-        ):
-            selected = "INTERVENE"
+        proposed = action_answer["value"]
+        if proposed not in ACTIONS:
+            raise ValueError("Jev selected an invalid supervision action")
+        depth = state.get("memory_expansion_depth", 0)
+        if not isinstance(depth, int) or isinstance(depth, bool) or not 0 <= depth <= max_expansion_depth:
+            raise ValueError("invalid memory expansion depth")
+        selected = proposed
+        # Jev's explicit action is authoritative. Only an unresolved request
+        # for more memory at the expansion limit needs a probability fallback.
+        if proposed == "NEED_MORE_MEMORY" and depth >= max_expansion_depth:
+            selected = (
+                "INTERVENE"
+                if depth >= 3
+                and action_answer["confidence"] >= action_threshold
+                and action_answer["probabilities"]["INTERVENE"] >= exhausted_intervention_threshold
+                and bool(_intervention_evidence(state, base))
+                else "CONTINUE"
+            )
         outcome_answer = None
         if selected == "CLOSE_PROCESS":
             outcome_answer = typed_answer(action_answers.get("process_outcome"))
@@ -250,6 +298,8 @@ def make_supervision_decision(
             evidence_memory_ids=decision.get("evidence_memory_ids"),
             reason_codes=decision.get("reason_codes"),
             expansion_depth=state.get("memory_expansion_depth", 0),
+            proposed_action=proposed,
+            decision_route="context_retrieval" if selected == "NEED_MORE_MEMORY" else "supervision",
         )
         return {
             "supervision_diagnostics": diagnostics,

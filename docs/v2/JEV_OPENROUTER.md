@@ -151,13 +151,18 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_DEPLOYMENT=<chosen-generative-model>
 ```
 
-Future thresholds are explicit configuration, not prompt rules:
+Thresholds are explicit configuration, not prompt rules:
 
 ```text
 JEV_NEW_PROCESS_MIN_PROB
-JEV_ACTION_MIN_CONFIDENCE
-JEV_CONTEXT_SUFFICIENT_MIN_PROB
+JEV_ACTION_MIN_CONFIDENCE (only after three NEED_MORE_MEMORY expansions)
+JEV_EXHAUSTED_INTERVENTION_MIN_PROB (only after three NEED_MORE_MEMORY expansions)
+JEV_OUTCOME_MIN_CONFIDENCE (process closure only)
 ```
+
+An explicit Jev `INTERVENE` is routed without confidence or context-sufficiency
+thresholds; the selected evidence and reason codes must still be valid. Repeated
+evidence IDs in different selection slots are deduplicated before delivery.
 
 ## Observability and Evaluation
 
